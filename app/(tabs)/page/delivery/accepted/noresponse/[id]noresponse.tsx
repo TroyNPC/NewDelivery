@@ -22,7 +22,21 @@ export default function NoResponse() {
   const router = useRouter();
   const { id } = useLocalSearchParams(); // ✅ Get delivery ID
   const [photo, setPhoto] = useState<string | null>(null);
-
+  const {
+      name,
+      address,
+      weight,
+      price,
+      time,
+      distance,
+      status,
+      number,
+      lat,
+      lng,
+      acceptedAt,
+      eta,
+    } = useLocalSearchParams();
+  
   // ✅ Clear photo when new delivery ID is opened
   useEffect(() => {
     setPhoto(null);
@@ -75,7 +89,27 @@ export default function NoResponse() {
 
         <View style={styles.headerContent}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() => {
+                router.push({
+                pathname: "/(tabs)/page/delivery/noreponse" as unknown as any,
+                params: {
+                  name,
+                  address,
+                  weight,
+                  price,
+                  time,
+                  distance,
+                  status,
+                  number,
+                  lat,
+                  lng,
+                  acceptedAt,
+                  eta,
+                },
+              });
+
+            }}
+
             style={styles.backButton}
           >
             <Ionicons name="arrow-back" size={22} color="#fff" />

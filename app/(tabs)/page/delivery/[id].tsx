@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Location from "expo-location";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   SafeAreaView,
@@ -10,13 +10,13 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { WebView } from "react-native-webview";
-import Svg, { Path } from "react-native-svg";
 import {
   moderateScale,
   scale,
   verticalScale,
 } from "react-native-size-matters";
+import Svg, { Path } from "react-native-svg";
+import { WebView } from "react-native-webview";
 
 export default function DeliveryDetails() {
   const router = useRouter();
@@ -24,6 +24,7 @@ export default function DeliveryDetails() {
 
   // 🧠 All parameters from the card
   const {
+    id,
     name,
     address,
     weight,
@@ -107,6 +108,13 @@ const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: numbe
           .leaflet-control-zoom a:hover {
             background-color: rgba(56, 100, 195, 1) !important;
           }
+            .leaflet-routing-container {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
         </style>
       </head>
       <body>
@@ -220,6 +228,7 @@ const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: numbe
             router.push({
             pathname: "/(tabs)/page/delivery/accepted/[id]"  as unknown as any,
             params: {
+                id,
                 name,
                 address,
                 weight,

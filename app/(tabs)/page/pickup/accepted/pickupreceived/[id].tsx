@@ -3,27 +3,27 @@ import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  Linking,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
+    Linking,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+    useWindowDimensions,
 } from "react-native";
 import {
-  moderateScale,
-  scale,
-  verticalScale,
+    moderateScale,
+    scale,
+    verticalScale,
 } from "react-native-size-matters";
 import Svg, { Path } from "react-native-svg";
 import { WebView } from "react-native-webview";
 
-export default function DeliveryDetails() {
+export default function PickupReceived() {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
 
-  // 🧩 All delivery details passed from deliveries.tsx
+  // 👇 All params from previous screen
   const {
     name,
     address,
@@ -36,13 +36,23 @@ export default function DeliveryDetails() {
     lat,
     lng,
     acceptedAt,
-    eta,
   } = useLocalSearchParams();
+
+  // Mock: Laundry shop location (fixed)
+  const laundryShop = { lat: 9.3125, lng: 123.307, name: "Laundry Shop" };
 
   const [currentLocation, setCurrentLocation] = useState<{
     lat: number;
     lng: number;
   } | null>(null);
+
+  // 🕒 Track arrival time update
+  const [arrivalTime, setArrivalTime] = useState(
+    new Date(Date.now() + 10 * 60000).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  );
 
   useEffect(() => {
     (async () => {
@@ -73,7 +83,7 @@ export default function DeliveryDetails() {
     );
   }
 
-  // 🗺 Leaflet Map
+  // 🗺 Leaflet Map: user → laundry shop
   const mapHTML = `
     <!DOCTYPE html>
     <html>
@@ -87,29 +97,17 @@ export default function DeliveryDetails() {
           html, body { margin: 0; padding: 0; height: 100%; width: 100%; }
           #map { height: 100%; width: 100%; border-radius: 12px; background: #f0f0f0; }
           .leaflet-container { background: #f0f0f0; }
-          .leaflet-control-zoom-in, .leaflet-control-zoom-out {
-            width: 30px !important;
-            height: 30px !important;
-            line-height: 24px !important;
-            font-size: 23px !important;
-            border-radius: 6px !important;
-            text-align: center !important;
-          }
-          .leaflet-control-zoom-in { margin-bottom: 10px !important; }
           .leaflet-control-zoom a {
             background-color: rgba(56, 100, 195, 0.85) !important;
             color: white !important;
             border: none !important;
           }
-          .leaflet-control-zoom a:hover {
-            background-color: rgba(56, 100, 195, 1) !important;
-          }
             .leaflet-routing-container {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-}
+                display: none !important;
+                visibility: hidden !important;
+                opacity: 0 !important;
+                pointer-events: none !important;
+                }
 
         </style>
       </head>
@@ -117,16 +115,19 @@ export default function DeliveryDetails() {
         <div id="map"></div>
         <script>
           document.addEventListener('DOMContentLoaded', function() {
-            var map = L.map('map').setView([${currentLocation.lat}, ${currentLocation.lng}], 14);
+            var map = L.map('map').setView([${lat}, ${lng}], 14);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
-            var currentMarker = L.marker([${currentLocation.lat}, ${currentLocation.lng}]).addTo(map)
-              .bindPopup("You are here");
-            var destMarker = L.marker([${lat}, ${lng}]).addTo(map)
-              .bindPopup("Destination");
+
+            var userMarker = L.marker([${lat}, ${lng}]).addTo(map)
+              .bindPopup("Customer Location");
+
+            var shopMarker = L.marker([${laundryShop.lat}, ${laundryShop.lng}]).addTo(map)
+              .bindPopup("${laundryShop.name}");
+
             L.Routing.control({
               waypoints: [
-                L.latLng(${currentLocation.lat}, ${currentLocation.lng}),
-                L.latLng(${lat}, ${lng})
+                L.latLng(${lat}, ${lng}),
+                L.latLng(${laundryShop.lat}, ${laundryShop.lng})
               ],
               lineOptions: { styles: [{ color: '#3864C3', weight: 5 }] },
               createMarker: function() { return null; },
@@ -152,9 +153,15 @@ export default function DeliveryDetails() {
     }
   };
 
+  const handleArrived = () => {
+    setArrivalTime(
+      new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    );
+  };
+
   return (
     <SafeAreaView style={[styles.container, { minHeight: height }]}>
-      {/* HEADER (untouched) */}
+      {/* HEADER */}
       <View style={[styles.headerBox, { height: verticalScale(100) }]}>
         <Svg
           width={"100%"}
@@ -171,12 +178,14 @@ export default function DeliveryDetails() {
 
         <View style={styles.headerContent}>
           <TouchableOpacity
-            onPress={() => router.push("/(tabs)/page/deliveries")}
+            onPress={() => {
+              router.back();
+            }}
             style={styles.backButton}
           >
             <Ionicons name="arrow-back" size={22} color="#fff" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Deliveries</Text>
+          <Text style={styles.headerTitle}>Pickups</Text>
         </View>
       </View>
 
@@ -194,11 +203,16 @@ export default function DeliveryDetails() {
 
         <View style={styles.timeRow}>
           <Text style={styles.timeText}>
-            Delivery Accepted at:{" "}
-            <Text style={styles.bold}>{acceptedAt || "N/A"}</Text>
+            Pickup Arrived at:{" "}
+            <Text style={styles.bold}>
+              {new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </Text>
           </Text>
           <Text style={styles.timeText}>
-            Estimated Arrival: <Text style={styles.bold}>{eta || "N/A"}</Text>
+            Shop Arrival Time: <Text style={styles.bold}>{arrivalTime}</Text>
           </Text>
         </View>
 
@@ -212,35 +226,9 @@ export default function DeliveryDetails() {
           />
         </View>
 
-        <TouchableOpacity
-          style={styles.confirmBtn}
-          onPress={() => alert(`Delivery for ${name} confirmed!`)}
-        >
-          <Text style={styles.confirmText}>Confirm Delivery</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.noResponseBtn}
-          onPress={() =>
-            router.push({
-                pathname: "/(tabs)/page/delivery/accepted/noresponse/[id]noresponse" as unknown as any,
-                params: {
-                name,
-                address,
-                weight,
-                price,
-                time,
-                distance,
-                status,
-                lat,
-                lng,
-                acceptedAt: new Date().toISOString(),
-                },
-            })
-            }
-
-        >
-          <Text style={styles.noResponseText}>No Response</Text>
+        {/* ✅ Arrived at Shop Button */}
+        <TouchableOpacity style={styles.arriveButton} onPress={handleArrived}>
+          <Text style={styles.arriveText}>Arrived at Shop</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -320,27 +308,16 @@ const styles = StyleSheet.create({
     marginVertical: verticalScale(10),
   },
   map: { flex: 1 },
-  confirmBtn: {
+  arriveButton: {
     backgroundColor: "#0AADFF",
-    paddingVertical: verticalScale(12),
-    borderRadius: scale(10),
-    marginBottom: verticalScale(10),
+    paddingVertical: verticalScale(10),
+    borderRadius: scale(8),
+    alignItems: "center",
+    marginTop: verticalScale(10),
   },
-  confirmText: {
+  arriveText: {
     color: "#fff",
-    textAlign: "center",
     fontWeight: "bold",
-    fontSize: moderateScale(15),
-  },
-  noResponseBtn: {
-    backgroundColor: "#C62828",
-    paddingVertical: verticalScale(12),
-    borderRadius: scale(10),
-  },
-  noResponseText: {
-    color: "#fff",
-    textAlign: "center",
-    fontWeight: "bold",
-    fontSize: moderateScale(15),
+    fontSize: moderateScale(14),
   },
 });

@@ -3,27 +3,27 @@ import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+    useWindowDimensions,
 } from "react-native";
 import {
-  moderateScale,
-  scale,
-  verticalScale,
+    moderateScale,
+    scale,
+    verticalScale,
 } from "react-native-size-matters";
 import Svg, { Path } from "react-native-svg";
 import { WebView } from "react-native-webview";
 
-export default function LaundryInfo() {
+export default function PickUpInfo() {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
 
-  const deliveries = [
+  const pickups = [
     {
       id: 1,
       name: "John Michael Guttierrez",
@@ -32,8 +32,8 @@ export default function LaundryInfo() {
       price: "₱120",
       time: "3 minutes",
       distance: "1.0km",
-      status: "Delivery",
-      number: '09352537960',
+      status: "Pick Up",
+      number: "09352537960",
       destination: { lat: 9.3082, lng: 123.3074 },
     },
     {
@@ -44,8 +44,8 @@ export default function LaundryInfo() {
       price: "₱200",
       time: "8 minutes",
       distance: "4.0km",
-      status: "Delivery",
-      number: '09352537960',
+      status: "Pick Up",
+      number: "09352537960",
       destination: { lat: 9.3105, lng: 123.3 },
     },
     {
@@ -56,13 +56,12 @@ export default function LaundryInfo() {
       price: "₱160",
       time: "5 minutes",
       distance: "3.0km",
-      status: "Picked Up and Delivery",
-      number: '09352537960',
+      status: "Pick Up",
+      number: "09352537960",
       destination: { lat: 9.315, lng: 123.301 },
     },
   ];
 
-  // ✅ Use real GPS instead of static user location
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
@@ -79,7 +78,6 @@ export default function LaundryInfo() {
         lng: location.coords.longitude,
       });
 
-      // ✅ Watch position to update live
       const watchId = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
@@ -99,7 +97,6 @@ export default function LaundryInfo() {
   }, []);
 
   const renderMiniMap = (destination: { lat: number; lng: number }) => {
-    // Don't render map until GPS is ready
     if (!currentLocation) {
       return (
         <View
@@ -146,11 +143,11 @@ export default function LaundryInfo() {
               border-radius: 6px !important;
             }
               .leaflet-routing-container {
-              display: none !important;
-              visibility: hidden !important;
-              opacity: 0 !important;
-              pointer-events: none !important;
-            }
+                display: none !important;
+                visibility: hidden !important;
+                opacity: 0 !important;
+                pointer-events: none !important;
+                }
 
             .leaflet-control-zoom a {
               background-color: rgba(56, 100, 195, 0.85) !important;
@@ -176,7 +173,7 @@ export default function LaundryInfo() {
                 .bindPopup("You are here");
 
               var destMarker = L.marker([${destination.lat}, ${destination.lng}]).addTo(map)
-                .bindPopup("Destination");
+                .bindPopup("Pick Up Location");
 
               L.Routing.control({
                 waypoints: [
@@ -250,21 +247,22 @@ export default function LaundryInfo() {
               { fontSize: moderateScale(width < 360 ? 18 : 22) },
             ]}
           >
-            DELIVERIES
+            PICK UPS
           </Text>
           <View style={{ width: moderateScale(24) }} />
         </View>
       </View>
 
-        <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{
-            flexGrow: 1,
-            paddingBottom: verticalScale(100),
-        }}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-        >
+             <ScrollView
+             style={{ flex: 1 }}
+             contentContainerStyle={{
+                 flexGrow: 1,
+                 paddingBottom: verticalScale(100),
+             }}
+             keyboardShouldPersistTaps="handled"
+             showsVerticalScrollIndicator={false}
+             >
+
         <View style={[styles.infoBox, { maxWidth: "100%" }]}>
           <View style={{ flex: 1 }}>
             <Text style={styles.infoTitle}>
@@ -279,7 +277,7 @@ export default function LaundryInfo() {
           </View>
         </View>
 
-        {deliveries.map((item) => (
+        {pickups.map((item) => (
           <View key={item.id} style={[styles.card, { maxWidth: "95%" }]}>
             <View
               style={{
@@ -293,7 +291,7 @@ export default function LaundryInfo() {
                 activeOpacity={0.8}
                 onPress={() =>
                   router.push({
-                    pathname: "/(tabs)/page/delivery/[id]" as unknown as any,
+                    pathname: "/(tabs)/page/pickup/[id]" as unknown as any,
                     params: {
                       id: String(item.id),
                       name: item.name,

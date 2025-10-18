@@ -3,28 +3,28 @@ import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  Linking,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+    useWindowDimensions,
 } from "react-native";
 import {
-  moderateScale,
-  scale,
-  verticalScale,
+    moderateScale,
+    scale,
+    verticalScale,
 } from "react-native-size-matters";
 import Svg, { Path } from "react-native-svg";
 import { WebView } from "react-native-webview";
 
-export default function DeliveryDetails() {
+export default function PickupDetails() {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
 
-  // 🧩 All delivery details passed from deliveries.tsx
+  // 🧠 All parameters from the card
   const {
+    id,
     name,
     address,
     weight,
@@ -35,14 +35,10 @@ export default function DeliveryDetails() {
     number,
     lat,
     lng,
-    acceptedAt,
-    eta,
   } = useLocalSearchParams();
 
-  const [currentLocation, setCurrentLocation] = useState<{
-    lat: number;
-    lng: number;
-  } | null>(null);
+  // ✅ Use real GPS instead of static location
+  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -73,15 +69,21 @@ export default function DeliveryDetails() {
     );
   }
 
-  // 🗺 Leaflet Map
+  // 🗺 Render Leaflet Map (with real road routing, no panel)
   const mapHTML = `
     <!DOCTYPE html>
     <html>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+        <link
+          rel="stylesheet"
+          href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        />
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+        <link
+          rel="stylesheet"
+          href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"
+        />
         <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
         <style>
           html, body { margin: 0; padding: 0; height: 100%; width: 100%; }
@@ -95,14 +97,8 @@ export default function DeliveryDetails() {
             border-radius: 6px !important;
             text-align: center !important;
           }
-          .leaflet-control-zoom-in { margin-bottom: 10px !important; }
-          .leaflet-control-zoom a {
-            background-color: rgba(56, 100, 195, 0.85) !important;
-            color: white !important;
-            border: none !important;
-          }
-          .leaflet-control-zoom a:hover {
-            background-color: rgba(56, 100, 195, 1) !important;
+          .leaflet-control-zoom-in {
+            margin-bottom: 10px !important;
           }
             .leaflet-routing-container {
   display: none !important;
@@ -111,6 +107,14 @@ export default function DeliveryDetails() {
   pointer-events: none !important;
 }
 
+          .leaflet-control-zoom a {
+            background-color: rgba(56, 100, 195, 0.85) !important;
+            color: white !important;
+            border: none !important;
+          }
+          .leaflet-control-zoom a:hover {
+            background-color: rgba(56, 100, 195, 1) !important;
+          }
         </style>
       </head>
       <body>
@@ -119,42 +123,42 @@ export default function DeliveryDetails() {
           document.addEventListener('DOMContentLoaded', function() {
             var map = L.map('map').setView([${currentLocation.lat}, ${currentLocation.lng}], 14);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
             var currentMarker = L.marker([${currentLocation.lat}, ${currentLocation.lng}]).addTo(map)
               .bindPopup("You are here");
+
             var destMarker = L.marker([${lat}, ${lng}]).addTo(map)
-              .bindPopup("Destination");
+              .bindPopup("Pick Up Location");
+
+            // ✅ Use Leaflet Routing Machine (trace real roads)
             L.Routing.control({
               waypoints: [
                 L.latLng(${currentLocation.lat}, ${currentLocation.lng}),
                 L.latLng(${lat}, ${lng})
               ],
-              lineOptions: { styles: [{ color: '#3864C3', weight: 5 }] },
+              lineOptions: {
+                styles: [{ color: '#3864C3', weight: 5 }]
+              },
               createMarker: function() { return null; },
               addWaypoints: false,
               draggableWaypoints: false,
               fitSelectedRoutes: true,
               show: false
-            }).on('routeselected', function() {
+            })
+            .on('routeselected', function() {
               const container = document.querySelector('.leaflet-routing-container');
               if (container) container.style.display = 'none';
-            }).addTo(map);
+            })
+            .addTo(map);
           });
         </script>
       </body>
     </html>
   `;
 
-  const handleCall = () => {
-    if (number) {
-      Linking.openURL(`tel:${number}`);
-    } else {
-      alert("No phone number available");
-    }
-  };
-
   return (
     <SafeAreaView style={[styles.container, { minHeight: height }]}>
-      {/* HEADER (untouched) */}
+      {/* Header */}
       <View style={[styles.headerBox, { height: verticalScale(100) }]}>
         <Svg
           width={"100%"}
@@ -171,60 +175,60 @@ export default function DeliveryDetails() {
 
         <View style={styles.headerContent}>
           <TouchableOpacity
-            onPress={() => router.push("/(tabs)/page/deliveries")}
+            onPress={() => router.push("/(tabs)/page/pickups")}
             style={styles.backButton}
           >
             <Ionicons name="arrow-back" size={22} color="#fff" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Deliveries</Text>
+          <Text style={styles.headerTitle}>Pickups</Text>
         </View>
       </View>
 
-      {/* CONTENT */}
-      <View style={styles.body}>
+      {/* Pickup Info */}
+      <View style={styles.content}>
         <Text style={styles.forText}>For: {name}</Text>
 
-        <View style={styles.phoneRow}>
-          <Ionicons name="call-outline" size={20} color="#000" />
-          <Text style={styles.phoneText}>{number || "No number provided"}</Text>
-          <TouchableOpacity style={styles.callButton} onPress={handleCall}>
-            <Text style={styles.callButtonText}>Call</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.timeRow}>
-          <Text style={styles.timeText}>
-            Delivery Accepted at:{" "}
-            <Text style={styles.bold}>{acceptedAt || "N/A"}</Text>
-          </Text>
-          <Text style={styles.timeText}>
-            Estimated Arrival: <Text style={styles.bold}>{eta || "N/A"}</Text>
-          </Text>
-        </View>
-
-        <View style={styles.mapBox}>
+        <View style={styles.mapContainer}>
           <WebView
             originWhitelist={["*"]}
             source={{ html: mapHTML }}
-            javaScriptEnabled
-            domStorageEnabled
+            javaScriptEnabled={true}
+            domStorageEnabled={true}
             style={styles.map}
           />
         </View>
 
-        <TouchableOpacity
-          style={styles.confirmBtn}
-          onPress={() => alert(`Delivery for ${name} confirmed!`)}
-        >
-          <Text style={styles.confirmText}>Confirm Delivery</Text>
-        </TouchableOpacity>
+        <View style={styles.infoSection}>
+          <View style={styles.infoRow}>
+            <Ionicons name="location-outline" size={18} color="#000" />
+            <Text style={styles.infoText}>{address}</Text>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Ionicons name="scale-outline" size={18} color="#000" />
+            <Text style={styles.infoText}>{weight}</Text>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Ionicons name="cash-outline" size={18} color="#000" />
+            <Text style={styles.infoText}>{price}</Text>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Ionicons name="bicycle-outline" size={18} color="#000" />
+            <Text style={styles.infoText}>
+              {time} | {distance}
+            </Text>
+          </View>
+        </View>
 
         <TouchableOpacity
-          style={styles.noResponseBtn}
+          style={styles.acceptButton}
           onPress={() =>
             router.push({
-                pathname: "/(tabs)/page/delivery/accepted/noresponse/[id]noresponse" as unknown as any,
-                params: {
+              pathname: "/(tabs)/page/pickup/accepted/[id]" as unknown as any,
+              params: {
+                id,
                 name,
                 address,
                 weight,
@@ -232,15 +236,16 @@ export default function DeliveryDetails() {
                 time,
                 distance,
                 status,
+                number,
                 lat,
                 lng,
-                acceptedAt: new Date().toISOString(),
-                },
+              },
             })
-            }
-
+          }
         >
-          <Text style={styles.noResponseText}>No Response</Text>
+          <Text style={styles.acceptButtonText}>
+            {status === "Pick Up" ? "Accept Pick Up" : "Accept Task"}
+          </Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -274,73 +279,48 @@ const styles = StyleSheet.create({
     top: verticalScale(-5),
     padding: 6,
   },
-  body: {
+  content: {
     paddingHorizontal: scale(20),
     marginTop: verticalScale(10),
   },
   forText: {
-    fontSize: moderateScale(15),
+    fontSize: moderateScale(16),
     fontWeight: "bold",
-    marginBottom: verticalScale(6),
-  },
-  phoneRow: {
-    flexDirection: "row",
-    alignItems: "center",
     marginBottom: verticalScale(10),
   },
-  phoneText: {
-    fontSize: moderateScale(14),
-    marginLeft: scale(5),
-    flex: 1,
-  },
-  callButton: {
-    backgroundColor: "#007AFF",
-    paddingVertical: verticalScale(5),
-    paddingHorizontal: scale(15),
-    borderRadius: scale(6),
-  },
-  callButtonText: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: moderateScale(13),
-  },
-  timeRow: {
-    marginBottom: verticalScale(8),
-  },
-  timeText: {
-    fontSize: moderateScale(13),
-    color: "#000",
-  },
-  bold: { fontWeight: "bold" },
-  mapBox: {
+  mapContainer: {
     width: "100%",
-    height: verticalScale(220),
+    height: verticalScale(200),
     borderRadius: scale(12),
     overflow: "hidden",
-    marginVertical: verticalScale(10),
+    marginBottom: verticalScale(15),
   },
   map: { flex: 1 },
-  confirmBtn: {
-    backgroundColor: "#0AADFF",
-    paddingVertical: verticalScale(12),
-    borderRadius: scale(10),
-    marginBottom: verticalScale(10),
+  infoSection: {
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    paddingVertical: verticalScale(10),
   },
-  confirmText: {
+  infoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: verticalScale(6),
+  },
+  infoText: {
+    fontSize: moderateScale(13),
+    color: "#000",
+    marginLeft: scale(8),
+    flexShrink: 1,
+  },
+  acceptButton: {
+    marginTop: verticalScale(15),
+    backgroundColor: "#007AFF",
+    paddingVertical: verticalScale(14),
+    borderRadius: scale(10),
+  },
+  acceptButtonText: {
     color: "#fff",
     textAlign: "center",
     fontWeight: "bold",
-    fontSize: moderateScale(15),
-  },
-  noResponseBtn: {
-    backgroundColor: "#C62828",
-    paddingVertical: verticalScale(12),
-    borderRadius: scale(10),
-  },
-  noResponseText: {
-    color: "#fff",
-    textAlign: "center",
-    fontWeight: "bold",
-    fontSize: moderateScale(15),
   },
 });

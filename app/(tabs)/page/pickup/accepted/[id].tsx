@@ -3,27 +3,27 @@ import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  Linking,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
+    Linking,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+    useWindowDimensions,
 } from "react-native";
 import {
-  moderateScale,
-  scale,
-  verticalScale,
+    moderateScale,
+    scale,
+    verticalScale,
 } from "react-native-size-matters";
 import Svg, { Path } from "react-native-svg";
 import { WebView } from "react-native-webview";
 
-export default function DeliveryDetails() {
+export default function PickupDetails() {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
 
-  // 🧩 All delivery details passed from deliveries.tsx
+  // 🧩 All pickup details passed from pickups.tsx
   const {
     name,
     address,
@@ -95,6 +95,13 @@ export default function DeliveryDetails() {
             border-radius: 6px !important;
             text-align: center !important;
           }
+            .leaflet-routing-container {
+            display: none !important;
+            visibility: hidden !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+            }
+
           .leaflet-control-zoom-in { margin-bottom: 10px !important; }
           .leaflet-control-zoom a {
             background-color: rgba(56, 100, 195, 0.85) !important;
@@ -104,13 +111,6 @@ export default function DeliveryDetails() {
           .leaflet-control-zoom a:hover {
             background-color: rgba(56, 100, 195, 1) !important;
           }
-            .leaflet-routing-container {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-}
-
         </style>
       </head>
       <body>
@@ -122,7 +122,7 @@ export default function DeliveryDetails() {
             var currentMarker = L.marker([${currentLocation.lat}, ${currentLocation.lng}]).addTo(map)
               .bindPopup("You are here");
             var destMarker = L.marker([${lat}, ${lng}]).addTo(map)
-              .bindPopup("Destination");
+              .bindPopup("Pickup Location");
             L.Routing.control({
               waypoints: [
                 L.latLng(${currentLocation.lat}, ${currentLocation.lng}),
@@ -154,7 +154,7 @@ export default function DeliveryDetails() {
 
   return (
     <SafeAreaView style={[styles.container, { minHeight: height }]}>
-      {/* HEADER (untouched) */}
+      {/* HEADER */}
       <View style={[styles.headerBox, { height: verticalScale(100) }]}>
         <Svg
           width={"100%"}
@@ -171,12 +171,31 @@ export default function DeliveryDetails() {
 
         <View style={styles.headerContent}>
           <TouchableOpacity
-            onPress={() => router.push("/(tabs)/page/deliveries")}
+                       onPress={() => {
+                router.push({
+                pathname: "/(tabs)/page/pickup/accepted" as unknown as any,
+                params: {
+                  name,
+                  address,
+                  weight,
+                  price,
+                  time,
+                  distance,
+                  status,
+                  number,
+                  lat,
+                  lng,
+                  acceptedAt,
+                  eta,
+                },
+              });
+
+            }}
             style={styles.backButton}
           >
             <Ionicons name="arrow-back" size={22} color="#fff" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Deliveries</Text>
+          <Text style={styles.headerTitle}>Pickups</Text>
         </View>
       </View>
 
@@ -194,7 +213,7 @@ export default function DeliveryDetails() {
 
         <View style={styles.timeRow}>
           <Text style={styles.timeText}>
-            Delivery Accepted at:{" "}
+            Pickup Accepted at:{" "}
             <Text style={styles.bold}>{acceptedAt || "N/A"}</Text>
           </Text>
           <Text style={styles.timeText}>
@@ -214,33 +233,26 @@ export default function DeliveryDetails() {
 
         <TouchableOpacity
           style={styles.confirmBtn}
-          onPress={() => alert(`Delivery for ${name} confirmed!`)}
-        >
-          <Text style={styles.confirmText}>Confirm Delivery</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.noResponseBtn}
           onPress={() =>
             router.push({
-                pathname: "/(tabs)/page/delivery/accepted/noresponse/[id]noresponse" as unknown as any,
-                params: {
+              pathname: "/(tabs)/page/pickup/accepted/pickupreceived/[id]" as unknown as any,
+              params: {
                 name,
                 address,
                 weight,
                 price,
                 time,
+                number,
                 distance,
                 status,
                 lat,
                 lng,
                 acceptedAt: new Date().toISOString(),
-                },
+              },
             })
-            }
-
+          }
         >
-          <Text style={styles.noResponseText}>No Response</Text>
+          <Text style={styles.confirmText}>Pick Up Received</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -327,17 +339,6 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(10),
   },
   confirmText: {
-    color: "#fff",
-    textAlign: "center",
-    fontWeight: "bold",
-    fontSize: moderateScale(15),
-  },
-  noResponseBtn: {
-    backgroundColor: "#C62828",
-    paddingVertical: verticalScale(12),
-    borderRadius: scale(10),
-  },
-  noResponseText: {
     color: "#fff",
     textAlign: "center",
     fontWeight: "bold",
