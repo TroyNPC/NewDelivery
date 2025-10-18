@@ -1,98 +1,199 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
-
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
+import {
+  Dimensions,
+  Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  ImageBackground,
+} from "react-native";
+import Svg, { Path } from "react-native-svg";
+import { scale, verticalScale } from "react-native-size-matters";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const router = useRouter();
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  // Track screen size dynamically (for rotation or resize)
+  const [screen, setScreen] = useState(Dimensions.get("window"));
+
+  useEffect(() => {
+    const subscription = Dimensions.addEventListener("change", ({ window }) => {
+      setScreen(window);
+    });
+    return () => subscription?.remove();
+  }, []);
+
+  const svgHeight = screen.height * 0.25;
+  const vbW = 1440;
+  const vbH = 320;
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: "#0AADFF" }]}>
+      {/* ===== Top Wave ===== */}
+      <Svg
+        width={screen.width}
+        height={verticalScale(300)}
+        viewBox={`0 0 ${vbW} ${vbH}`}
+        style={styles.topWave}
+        preserveAspectRatio="none"
+      >
+        <Path
+          fill="#355fc7"
+          d={`M0,0 L0,${vbH * 0.3} C ${vbW * 0.3},${vbH * 0.1} ${vbW * 0.6},${vbH * 0.8} ${vbW},${vbH * 0.7} L${vbW},0 Z`}
+        />
+      </Svg>
+
+      {/* ===== Content (Full Screen, No Scroll) ===== */}
+      <View
+        style={[
+          styles.content,
+          { width: screen.width, height: screen.height },
+        ]}
+      >
+        {/* Icon */}
+        <ImageBackground style={styles.ovalBackground} imageStyle={styles.ovalShape}>
+          <Image
+            source={require("../../assets/images/delivery.png")}
+            style={styles.icon}
+            resizeMode="contain"
+          />
+        </ImageBackground>
+
+        {/* Title */}
+        <Text style={styles.title} adjustsFontSizeToFit numberOfLines={2}>
+          LaundryGo Delivery
+        </Text>
+
+        {/* Login Box */}
+        <View
+          style={[
+            styles.loginBox,
+            { height: screen.height * 0.45 }, // adjust dynamically
+          ]}
+        >
+          <Text style={styles.loginTitle}>Log in to your Account</Text>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Name:</Text>
+            <View style={styles.inputField}>
+              <Text style={styles.placeholderText}>Name</Text>
+            </View>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Password:</Text>
+            <View style={styles.inputField}>
+              <Text style={styles.placeholderText}>Password</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={styles.loginButton}
+            onPress={() => router.push("/page/deliveries")}
+          >
+            <Text style={styles.loginButtonText}>Log In</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: {
+    flex: 1,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  content: {
+    justifyContent: "center",
+    alignItems: "center",
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
+  topWave: {
+    position: "absolute",
+    top: 0,
     left: 0,
-    position: 'absolute',
+  },
+  ovalBackground: {
+    width: scale(200),
+    height: verticalScale(180),
+    backgroundColor: "white",
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: scale(300),
+    overflow: "hidden",
+    alignSelf: "center",
+    marginTop: verticalScale(-5),
+  },
+  ovalShape: {
+    borderRadius: scale(150),
+  },
+  icon: {
+    width: scale(330),
+    height: verticalScale(210),
+    marginTop: verticalScale(-10),
+  },
+  title: {
+    fontSize: scale(45),
+    fontWeight: "bold",
+    color: "white",
+    textAlign: "center",
+    width: "80%",
+    marginBottom: verticalScale(25),
+  },
+  loginBox: {
+    backgroundColor: "white",
+    width: "100%",
+    borderTopLeftRadius: 25,
+    borderTopRightRadius: 25,
+    paddingVertical: verticalScale(25),
+    paddingHorizontal: scale(25),
+    alignItems: "center",
+    marginTop: verticalScale(15),
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  loginTitle: {
+    fontSize: scale(18),
+    fontWeight: "bold",
+    color: "black",
+    marginBottom: verticalScale(20),
+  },
+  inputGroup: {
+    width: "100%",
+    marginBottom: verticalScale(15),
+  },
+  inputLabel: {
+    color: "#355fc7",
+    fontWeight: "600",
+    fontSize: scale(14),
+    marginBottom: verticalScale(5),
+  },
+  inputField: {
+    width: "100%",
+    backgroundColor: "#F3F3F3",
+    borderRadius: 8,
+    paddingVertical: verticalScale(10),
+    paddingHorizontal: scale(10),
+  },
+  placeholderText: {
+    color: "gray",
+    fontSize: scale(14),
+  },
+  loginButton: {
+    backgroundColor: "#0AADFF",
+    marginTop: verticalScale(10),
+    paddingVertical: verticalScale(12),
+    paddingHorizontal: scale(100),
+    borderRadius: 40,
+    alignItems: "center",
+  },
+  loginButtonText: {
+    color: "white",
+    fontSize: scale(18),
+    fontWeight: "bold",
   },
 });
