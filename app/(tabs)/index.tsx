@@ -3,15 +3,16 @@ import React, { useEffect, useState } from "react";
 import {
   Dimensions,
   Image,
+  ImageBackground,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
-  ImageBackground,
 } from "react-native";
-import Svg, { Path } from "react-native-svg";
-import { scale, verticalScale } from "react-native-size-matters";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { scale, verticalScale } from "react-native-size-matters";
+import Svg, { Path } from "react-native-svg";
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -71,24 +72,34 @@ export default function HomeScreen() {
         <View
           style={[
             styles.loginBox,
-            { height: screen.height * 0.45 }, // adjust dynamically
+            { height: screen.height * 0.50 }, // adjust dynamically
           ]}
         >
           <Text style={styles.loginTitle}>Log in to your Account</Text>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Name:</Text>
-            <View style={styles.inputField}>
-              <Text style={styles.placeholderText}>Name</Text>
-            </View>
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>Name:</Text>
+          <View style={styles.inputField}>
+            <TextInput
+              style={styles.placeholderText}
+              placeholder="Name"
+              placeholderTextColor="gray"
+            />
           </View>
+        </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Password:</Text>
-            <View style={styles.inputField}>
-              <Text style={styles.placeholderText}>Password</Text>
-            </View>
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>Password:</Text>
+          <View style={styles.inputField}>
+            <TextInput
+              style={styles.placeholderText}
+              placeholder="Password"
+              placeholderTextColor="gray"
+              secureTextEntry
+            />
           </View>
+        </View>
+
 
           <TouchableOpacity
             style={styles.loginButton}
@@ -185,8 +196,8 @@ const styles = StyleSheet.create({
   },
   loginButton: {
     backgroundColor: "#0AADFF",
-    marginTop: verticalScale(10),
-    paddingVertical: verticalScale(12),
+    marginTop: verticalScale(0),
+    paddingVertical: verticalScale(5),
     paddingHorizontal: scale(100),
     borderRadius: 40,
     alignItems: "center",
