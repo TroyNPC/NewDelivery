@@ -98,7 +98,7 @@ export default function AccountSettings() {
             />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.menuItem} activeOpacity={0.7} onPress={() => router.push("/page/changepassword")}>
             <Ionicons
               name="lock-closed-outline"
               size={moderateScale(18)}

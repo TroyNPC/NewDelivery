@@ -1,20 +1,20 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
-    Linking,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
-    useWindowDimensions,
+  Linking,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
 } from "react-native";
 import {
-    moderateScale,
-    scale,
-    verticalScale,
+  moderateScale,
+  scale,
+  verticalScale,
 } from "react-native-size-matters";
 import Svg, { Path } from "react-native-svg";
 import { WebView } from "react-native-webview";
@@ -22,8 +22,8 @@ import { WebView } from "react-native-webview";
 export default function PickupReceived() {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
+  const webRef = useRef<WebView>(null);
 
-  // 👇 All params from previous screen
   const {
     name,
     address,
@@ -38,15 +38,7 @@ export default function PickupReceived() {
     acceptedAt,
   } = useLocalSearchParams();
 
-  // Mock: Laundry shop location (fixed)
-  const laundryShop = { lat: 9.3125, lng: 123.307, name: "Laundry Shop" };
-
-  const [currentLocation, setCurrentLocation] = useState<{
-    lat: number;
-    lng: number;
-  } | null>(null);
-
-  // 🕒 Track arrival time update
+  const [initialLocation, setInitialLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [arrivalTime, setArrivalTime] = useState(
     new Date(Date.now() + 10 * 60000).toLocaleTimeString([], {
       hour: "2-digit",
@@ -54,103 +46,162 @@ export default function PickupReceived() {
     })
   );
 
+  // ✅ Live GPS tracking logic (same as original request)
   useEffect(() => {
-    (async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        console.log("Permission to access location was denied");
-        return;
-      }
+    let locationSubscription: Location.LocationSubscription | null = null;
 
-      let location = await Location.getCurrentPositionAsync({});
-      setCurrentLocation({
-        lat: location.coords.latitude,
-        lng: location.coords.longitude,
-      });
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") {
+          console.log("Permission denied");
+          return;
+        }
+
+        const current = await Location.getCurrentPositionAsync({});
+        const coords = {
+          lat: current.coords.latitude,
+          lng: current.coords.longitude,
+        };
+        setInitialLocation(coords);
+
+        // Watch for live updates
+        locationSubscription = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.Highest,
+            timeInterval: 3000,
+            distanceInterval: 2,
+          },
+          (loc) => {
+            const newCoords = {
+              lat: loc.coords.latitude,
+              lng: loc.coords.longitude,
+            };
+            if (webRef.current) {
+              webRef.current.postMessage(
+                JSON.stringify({
+                  action: "updateUserLocation",
+                  lat: newCoords.lat,
+                  lng: newCoords.lng,
+                })
+              );
+            }
+          }
+        );
+      } catch (err) {
+        console.error("Location error:", err);
+      }
     })();
+
+    return () => {
+      if (locationSubscription) locationSubscription.remove();
+    };
   }, []);
 
-  if (!currentLocation) {
+  if (!initialLocation) {
     return (
       <SafeAreaView
-        style={[
-          styles.container,
-          { minHeight: height, justifyContent: "center", alignItems: "center" },
-        ]}
+        style={[styles.container, { justifyContent: "center", alignItems: "center" }]}
       >
         <Text>Loading your location...</Text>
       </SafeAreaView>
     );
   }
 
-  // 🗺 Leaflet Map: user → laundry shop
+  // ✅ Map HTML (LIVE GPS → destination route)
   const mapHTML = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
-        <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
-        <style>
-          html, body { margin: 0; padding: 0; height: 100%; width: 100%; }
-          #map { height: 100%; width: 100%; border-radius: 12px; background: #f0f0f0; }
-          .leaflet-container { background: #f0f0f0; }
-          .leaflet-control-zoom a {
-            background-color: rgba(56, 100, 195, 0.85) !important;
-            color: white !important;
-            border: none !important;
+  <!DOCTYPE html>
+  <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+      <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+      <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+      <style>
+        html, body, #map { height: 100%; margin: 0; padding: 0; }
+        .leaflet-routing-container { display: none !important; }
+
+        .gps-circle {
+          width: 24px;
+          height: 24px;
+          background: rgba(0, 136, 255, 0.3);
+          border: 4px solid #007bff;
+          border-radius: 50%;
+        }
+        .pulse {
+          animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+          0% { transform: scale(1); opacity: 1; }
+          100% { transform: scale(2); opacity: 0; }
+        }
+      </style>
+    </head>
+    <body>
+      <div id="map"></div>
+      <script>
+        const destLat = ${lat};
+        const destLng = ${lng};
+        const startLat = ${initialLocation.lat};
+        const startLng = ${initialLocation.lng};
+
+        const map = L.map('map').setView([startLat, startLng], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+        }).addTo(map);
+
+        // ✅ Destination marker
+        const destMarker = L.marker([destLat, destLng]).addTo(map).bindPopup("Destination");
+
+        // ✅ Rider live GPS marker
+        const gpsIcon = L.divIcon({
+          className: '',
+          html: '<div class="gps-circle pulse"></div>',
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+        });
+        let userMarker = L.marker([startLat, startLng], { icon: gpsIcon }).addTo(map);
+        let routeControl = null;
+
+        function drawRoute(fromLat, fromLng) {
+          if (routeControl) map.removeControl(routeControl);
+          routeControl = L.Routing.control({
+            waypoints: [
+              L.latLng(fromLat, fromLng),
+              L.latLng(destLat, destLng)
+            ],
+            lineOptions: { styles: [{ color: '#3864C3', weight: 5 }] },
+            addWaypoints: false,
+            draggableWaypoints: false,
+            fitSelectedRoutes: false,
+            show: false,
+          }).addTo(map);
+        }
+
+        drawRoute(startLat, startLng);
+
+        // ✅ Handle messages from React Native (live update)
+        document.addEventListener('message', (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.action === 'updateUserLocation') {
+              const { lat, lng } = data;
+              userMarker.setLatLng([lat, lng]);
+              drawRoute(lat, lng);
+            }
+          } catch (e) {
+            console.error("WebView message error:", e);
           }
-            .leaflet-routing-container {
-                display: none !important;
-                visibility: hidden !important;
-                opacity: 0 !important;
-                pointer-events: none !important;
-                }
-
-        </style>
-      </head>
-      <body>
-        <div id="map"></div>
-        <script>
-          document.addEventListener('DOMContentLoaded', function() {
-            var map = L.map('map').setView([${lat}, ${lng}], 14);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
-
-            var userMarker = L.marker([${lat}, ${lng}]).addTo(map)
-              .bindPopup("Customer Location");
-
-            var shopMarker = L.marker([${laundryShop.lat}, ${laundryShop.lng}]).addTo(map)
-              .bindPopup("${laundryShop.name}");
-
-            L.Routing.control({
-              waypoints: [
-                L.latLng(${lat}, ${lng}),
-                L.latLng(${laundryShop.lat}, ${laundryShop.lng})
-              ],
-              lineOptions: { styles: [{ color: '#3864C3', weight: 5 }] },
-              createMarker: function() { return null; },
-              addWaypoints: false,
-              draggableWaypoints: false,
-              fitSelectedRoutes: true,
-              show: false
-            }).on('routeselected', function() {
-              const container = document.querySelector('.leaflet-routing-container');
-              if (container) container.style.display = 'none';
-            }).addTo(map);
-          });
-        </script>
-      </body>
-    </html>
+        });
+      </script>
+    </body>
+  </html>
   `;
 
   const handleCall = () => {
-    if (number) {
-      Linking.openURL(`tel:${number}`);
-    } else {
-      alert("No phone number available");
-    }
+    if (number) Linking.openURL(`tel:${number}`);
+    else alert("No phone number available");
   };
 
   const handleArrived = () => {
@@ -161,7 +212,6 @@ export default function PickupReceived() {
 
   return (
     <SafeAreaView style={[styles.container, { minHeight: height }]}>
-      {/* HEADER */}
       <View style={[styles.headerBox, { height: verticalScale(100) }]}>
         <Svg
           width={"100%"}
@@ -170,17 +220,11 @@ export default function PickupReceived() {
           style={styles.waveTop}
           preserveAspectRatio="none"
         >
-          <Path
-            fill="#3864C3"
-            d="M0,64 C480,-32 720,256 1440,64 L1440,0 L0,0 Z"
-          />
+          <Path fill="#3864C3" d="M0,64 C480,-32 720,256 1440,64 L1440,0 L0,0 Z" />
         </Svg>
-
         <View style={styles.headerContent}>
           <TouchableOpacity
-            onPress={() => {
-              router.back();
-            }}
+            onPress={() => router.push("/(tabs)/page/pickups")}
             style={styles.backButton}
           >
             <Ionicons name="arrow-back" size={22} color="#fff" />
@@ -189,7 +233,6 @@ export default function PickupReceived() {
         </View>
       </View>
 
-      {/* CONTENT */}
       <View style={styles.body}>
         <Text style={styles.forText}>For: {name}</Text>
 
@@ -205,19 +248,17 @@ export default function PickupReceived() {
           <Text style={styles.timeText}>
             Pickup Arrived at:{" "}
             <Text style={styles.bold}>
-              {new Date().toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
+              {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </Text>
           </Text>
           <Text style={styles.timeText}>
-            Shop Arrival Time: <Text style={styles.bold}>{arrivalTime}</Text>
+            Destination Arrival Time: <Text style={styles.bold}>{arrivalTime}</Text>
           </Text>
         </View>
 
         <View style={styles.mapBox}>
           <WebView
+            ref={webRef}
             originWhitelist={["*"]}
             source={{ html: mapHTML }}
             javaScriptEnabled
@@ -226,9 +267,8 @@ export default function PickupReceived() {
           />
         </View>
 
-        {/* ✅ Arrived at Shop Button */}
         <TouchableOpacity style={styles.arriveButton} onPress={handleArrived}>
-          <Text style={styles.arriveText}>Arrived at Shop</Text>
+          <Text style={styles.arriveText}>Arrived at Destination</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -237,87 +277,22 @@ export default function PickupReceived() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
-  headerBox: {
-    width: "100%",
-    backgroundColor: "#0AADFF",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
+  headerBox: { width: "100%", backgroundColor: "#0AADFF", justifyContent: "center", overflow: "hidden" },
   waveTop: { position: "absolute", top: 0, left: 0, zIndex: 1 },
-  headerContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: verticalScale(40),
-    zIndex: 2,
-  },
-  headerTitle: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: moderateScale(20),
-  },
-  backButton: {
-    position: "absolute",
-    left: 20,
-    top: verticalScale(-5),
-    padding: 6,
-  },
-  body: {
-    paddingHorizontal: scale(20),
-    marginTop: verticalScale(10),
-  },
-  forText: {
-    fontSize: moderateScale(15),
-    fontWeight: "bold",
-    marginBottom: verticalScale(6),
-  },
-  phoneRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: verticalScale(10),
-  },
-  phoneText: {
-    fontSize: moderateScale(14),
-    marginLeft: scale(5),
-    flex: 1,
-  },
-  callButton: {
-    backgroundColor: "#007AFF",
-    paddingVertical: verticalScale(5),
-    paddingHorizontal: scale(15),
-    borderRadius: scale(6),
-  },
-  callButtonText: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: moderateScale(13),
-  },
-  timeRow: {
-    marginBottom: verticalScale(8),
-  },
-  timeText: {
-    fontSize: moderateScale(13),
-    color: "#000",
-  },
+  headerContent: { flexDirection: "row", alignItems: "center", justifyContent: "center", marginTop: verticalScale(40), zIndex: 2 },
+  headerTitle: { color: "#fff", fontWeight: "bold", fontSize: moderateScale(20) },
+  backButton: { position: "absolute", left: 20, top: verticalScale(-5), padding: 6 },
+  body: { paddingHorizontal: scale(20), marginTop: verticalScale(10) },
+  forText: { fontSize: moderateScale(15), fontWeight: "bold", marginBottom: verticalScale(6) },
+  phoneRow: { flexDirection: "row", alignItems: "center", marginBottom: verticalScale(10) },
+  phoneText: { fontSize: moderateScale(14), marginLeft: scale(5), flex: 1 },
+  callButton: { backgroundColor: "#007AFF", paddingVertical: verticalScale(5), paddingHorizontal: scale(15), borderRadius: scale(6) },
+  callButtonText: { color: "#fff", fontWeight: "bold", fontSize: moderateScale(13) },
+  timeRow: { marginBottom: verticalScale(8) },
+  timeText: { fontSize: moderateScale(13), color: "#000" },
   bold: { fontWeight: "bold" },
-  mapBox: {
-    width: "100%",
-    height: verticalScale(220),
-    borderRadius: scale(12),
-    overflow: "hidden",
-    marginVertical: verticalScale(10),
-  },
+  mapBox: { width: "100%", height: verticalScale(220), borderRadius: scale(12), overflow: "hidden", marginVertical: verticalScale(10) },
   map: { flex: 1 },
-  arriveButton: {
-    backgroundColor: "#0AADFF",
-    paddingVertical: verticalScale(10),
-    borderRadius: scale(8),
-    alignItems: "center",
-    marginTop: verticalScale(10),
-  },
-  arriveText: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: moderateScale(14),
-  },
+  arriveButton: { backgroundColor: "#0AADFF", paddingVertical: verticalScale(10), borderRadius: scale(8), alignItems: "center", marginTop: verticalScale(10) },
+  arriveText: { color: "#fff", fontWeight: "bold", fontSize: moderateScale(14) },
 });

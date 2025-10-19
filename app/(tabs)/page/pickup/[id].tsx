@@ -1,19 +1,20 @@
+// ✅ PickupDetails with full live GPS tracking (identical logic to MapScreen)
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
-    useWindowDimensions,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
 } from "react-native";
 import {
-    moderateScale,
-    scale,
-    verticalScale,
+  moderateScale,
+  scale,
+  verticalScale,
 } from "react-native-size-matters";
 import Svg, { Path } from "react-native-svg";
 import { WebView } from "react-native-webview";
@@ -22,7 +23,6 @@ export default function PickupDetails() {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
 
-  // 🧠 All parameters from the card
   const {
     id,
     name,
@@ -37,124 +37,165 @@ export default function PickupDetails() {
     lng,
   } = useLocalSearchParams();
 
-  // ✅ Use real GPS instead of static location
-  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [initialLocation, setInitialLocation] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
+  const webViewRef = useRef<WebView>(null);
 
+  // ✅ Full live GPS logic from MapScreen
   useEffect(() => {
-    (async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        console.log("Permission to access location was denied");
-        return;
-      }
+    let locationSubscription: Location.LocationSubscription | null = null;
 
-      let location = await Location.getCurrentPositionAsync({});
-      setCurrentLocation({
-        lat: location.coords.latitude,
-        lng: location.coords.longitude,
-      });
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") {
+          console.log("Permission denied");
+          return;
+        }
+
+        const current = await Location.getCurrentPositionAsync({});
+        setInitialLocation({
+          lat: current.coords.latitude,
+          lng: current.coords.longitude,
+        });
+
+        // Watch and update live GPS position
+        locationSubscription = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.Highest,
+            timeInterval: 3000,
+            distanceInterval: 2,
+          },
+          (loc) => {
+            const coords = {
+              lat: loc.coords.latitude,
+              lng: loc.coords.longitude,
+            };
+            if (webViewRef.current) {
+              webViewRef.current.postMessage(
+                JSON.stringify({
+                  action: "updateUserLocation",
+                  lat: coords.lat,
+                  lng: coords.lng,
+                })
+              );
+            }
+          }
+        );
+      } catch (err) {
+        console.error("Location error:", err);
+      }
     })();
+
+    return () => {
+      if (locationSubscription) locationSubscription.remove();
+    };
   }, []);
 
-  if (!currentLocation) {
+  if (!initialLocation) {
     return (
       <SafeAreaView
-        style={[
-          styles.container,
-          { minHeight: height, justifyContent: "center", alignItems: "center" },
-        ]}
+        style={[styles.container, { justifyContent: "center", alignItems: "center" }]}
       >
         <Text>Loading your location...</Text>
       </SafeAreaView>
     );
   }
 
-  // 🗺 Render Leaflet Map (with real road routing, no panel)
+  // ✅ Map HTML identical to MapScreen logic (live GPS + circle + route)
   const mapHTML = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <link
-          rel="stylesheet"
-          href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-        />
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        <link
-          rel="stylesheet"
-          href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"
-        />
-        <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
-        <style>
-          html, body { margin: 0; padding: 0; height: 100%; width: 100%; }
-          #map { height: 100%; width: 100%; border-radius: 12px; background: #f0f0f0; }
-          .leaflet-container { background: #f0f0f0; }
-          .leaflet-control-zoom-in, .leaflet-control-zoom-out {
-            width: 30px !important;
-            height: 30px !important;
-            line-height: 24px !important;
-            font-size: 23px !important;
-            border-radius: 6px !important;
-            text-align: center !important;
-          }
-          .leaflet-control-zoom-in {
-            margin-bottom: 10px !important;
-          }
-            .leaflet-routing-container {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-}
+  <!DOCTYPE html>
+  <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+      <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+      <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+      <style>
+        html, body, #map { height: 100%; margin: 0; padding: 0; }
+        .leaflet-routing-container { display: none !important; }
 
-          .leaflet-control-zoom a {
-            background-color: rgba(56, 100, 195, 0.85) !important;
-            color: white !important;
-            border: none !important;
+        /* ✅ GPS circle identical to MapScreen */
+        .gps-circle {
+          width: 24px;
+          height: 24px;
+          background: rgba(0, 136, 255, 0.3);
+          border: 4px solid #007bff;
+          border-radius: 50%;
+        }
+        .pulse {
+          animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+          0% { transform: scale(1); opacity: 1; }
+          100% { transform: scale(2); opacity: 0; }
+        }
+      </style>
+    </head>
+    <body>
+      <div id="map"></div>
+      <script>
+        const destLat = ${lat};
+        const destLng = ${lng};
+        const startLat = ${initialLocation.lat};
+        const startLng = ${initialLocation.lng};
+
+        const map = L.map('map').setView([startLat, startLng], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+        }).addTo(map);
+
+        // ✅ Destination marker
+        const destMarker = L.marker([destLat, destLng]).addTo(map).bindPopup("Pickup Destination");
+
+        // ✅ Live GPS circle marker
+        const gpsIcon = L.divIcon({
+          className: '',
+          html: '<div class="gps-circle pulse"></div>',
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+        });
+        let userMarker = L.marker([startLat, startLng], { icon: gpsIcon }).addTo(map);
+        let routeControl = null;
+
+        function drawRoute(fromLat, fromLng) {
+          if (routeControl) map.removeControl(routeControl);
+          routeControl = L.Routing.control({
+            waypoints: [
+              L.latLng(fromLat, fromLng),
+              L.latLng(destLat, destLng)
+            ],
+            lineOptions: { styles: [{ color: '#3864C3', weight: 5 }] },
+            addWaypoints: false,
+            draggableWaypoints: false,
+            fitSelectedRoutes: false,
+            show: false,
+          }).addTo(map);
+        }
+
+        drawRoute(startLat, startLng);
+
+        // ✅ Handle messages from React Native
+        document.addEventListener('message', (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.action === 'updateUserLocation') {
+              const { lat, lng } = data;
+              userMarker.setLatLng([lat, lng]);
+              // ❌ Removed map.panTo to stop auto-centering
+              drawRoute(lat, lng);
+            }
+          } catch (e) {
+            console.error("WebView message error:", e);
           }
-          .leaflet-control-zoom a:hover {
-            background-color: rgba(56, 100, 195, 1) !important;
-          }
-        </style>
-      </head>
-      <body>
-        <div id="map"></div>
-        <script>
-          document.addEventListener('DOMContentLoaded', function() {
-            var map = L.map('map').setView([${currentLocation.lat}, ${currentLocation.lng}], 14);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
-
-            var currentMarker = L.marker([${currentLocation.lat}, ${currentLocation.lng}]).addTo(map)
-              .bindPopup("You are here");
-
-            var destMarker = L.marker([${lat}, ${lng}]).addTo(map)
-              .bindPopup("Pick Up Location");
-
-            // ✅ Use Leaflet Routing Machine (trace real roads)
-            L.Routing.control({
-              waypoints: [
-                L.latLng(${currentLocation.lat}, ${currentLocation.lng}),
-                L.latLng(${lat}, ${lng})
-              ],
-              lineOptions: {
-                styles: [{ color: '#3864C3', weight: 5 }]
-              },
-              createMarker: function() { return null; },
-              addWaypoints: false,
-              draggableWaypoints: false,
-              fitSelectedRoutes: true,
-              show: false
-            })
-            .on('routeselected', function() {
-              const container = document.querySelector('.leaflet-routing-container');
-              if (container) container.style.display = 'none';
-            })
-            .addTo(map);
-          });
-        </script>
-      </body>
-    </html>
-  `;
+        });
+      </script>
+    </body>
+  </html>
+`;
 
   return (
     <SafeAreaView style={[styles.container, { minHeight: height }]}>
@@ -167,10 +208,7 @@ export default function PickupDetails() {
           style={styles.waveTop}
           preserveAspectRatio="none"
         >
-          <Path
-            fill="#3864C3"
-            d="M0,64 C480,-32 720,256 1440,64 L1440,0 L0,0 Z"
-          />
+          <Path fill="#3864C3" d="M0,64 C480,-32 720,256 1440,64 L1440,0 L0,0 Z" />
         </Svg>
 
         <View style={styles.headerContent}>
@@ -190,10 +228,11 @@ export default function PickupDetails() {
 
         <View style={styles.mapContainer}>
           <WebView
+            ref={webViewRef}
             originWhitelist={["*"]}
             source={{ html: mapHTML }}
-            javaScriptEnabled={true}
-            domStorageEnabled={true}
+            javaScriptEnabled
+            domStorageEnabled
             style={styles.map}
           />
         </View>
@@ -216,9 +255,7 @@ export default function PickupDetails() {
 
           <View style={styles.infoRow}>
             <Ionicons name="bicycle-outline" size={18} color="#000" />
-            <Text style={styles.infoText}>
-              {time} | {distance}
-            </Text>
+            <Text style={styles.infoText}>{time} | {distance}</Text>
           </View>
         </View>
 

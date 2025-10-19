@@ -33,6 +33,7 @@ export default function TabLayout() {
       <Tabs.Screen name="page/pickup/[id]" options={{ href: null }} />
       <Tabs.Screen name="page/delivery/accepted/[id]" options={{ href: null }} />
       <Tabs.Screen name="page/pickup/accepted/[id]" options={{ href: null }} />
+      <Tabs.Screen name="page/changepassword" options={{ href: null }} />
       <Tabs.Screen
         name="page/delivery/accepted/noresponse/[id]noresponse"
         options={{ href: null }}
