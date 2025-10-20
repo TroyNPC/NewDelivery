@@ -1,22 +1,96 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
-  Image,
+  ActivityIndicator,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   useWindowDimensions,
-  View,
+  View
 } from "react-native";
 import { moderateScale, scale, verticalScale } from "react-native-size-matters";
 import Svg, { Path } from "react-native-svg";
+import { supabase } from "../../../hooks/supabaseClient";
 
 export default function AccountSettings() {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
+  const [userData, setUserData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchUserData();
+  }, []);
+
+  const fetchUserData = async () => {
+    try {
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.log("No user found");
+        return;
+      }
+
+      // Fetch user details from users table
+      const { data: userDetails, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (error) {
+        console.log("Error fetching user details:", error);
+        return;
+      }
+
+      // Fetch user assignment to get role and shop info
+      const { data: assignment } = await supabase
+        .from('shop_user_assignments')
+        .select(`
+          role_in_shop,
+          shop:shops(name)
+        `)
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .single();
+
+      setUserData({
+        ...userDetails,
+        role: assignment?.role_in_shop || 'Delivery Personnel',
+        shop: assignment?.shop?.name || 'Laundry Shop'
+      });
+
+    } catch (error) {
+      console.log("Error fetching user data:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.log("Error signing out:", error);
+      } else {
+        router.replace("/");
+      }
+    } catch (error) {
+      console.log("Logout error:", error);
+    }
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#3864C3" />
+        <Text style={{ marginTop: 10 }}>Loading profile...</Text>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={[styles.container, { minHeight: height }]}>
@@ -65,18 +139,32 @@ export default function AccountSettings() {
       >
         {/* Profile Section */}
         <View style={styles.profileContainer}>
-          <Image
-            source={require('@/assets/images/pic.jpg')}
-            style={styles.profileImage}
-            resizeMode="cover"
-          />
-          <Text style={styles.profileName}>John Michael Guterirez</Text>
-          <Text style={styles.profileRole}>Delivery Boy</Text>
-          <Text style={styles.profileNumber}>(+63) 912 45 6789</Text>
-          <Text style={styles.profileEmail}>john.doe@email.com</Text>
+          {/* Default profile icon instead of image */}
+          <View style={styles.profileIcon}>
+            <Ionicons name="person" size={moderateScale(40)} color="#666" />
+          </View>
+          
+          <Text style={styles.profileName}>
+            {userData?.full_name || 'User Name'}
+          </Text>
+          <Text style={styles.profileRole}>
+            {userData?.role || 'Delivery Personnel'}
+          </Text>
+          <Text style={styles.profileNumber}>
+            {userData?.phone || 'Phone number not set'}
+          </Text>
+          <Text style={styles.profileEmail}>
+            {userData?.email || 'Email not set'}
+          </Text>
+          <Text style={styles.profileShop}>
+            {userData?.shop || 'Shop assignment'}
+          </Text>
 
-          <TouchableOpacity activeOpacity={0.8} style={styles.logoutButton} onPress={() => router.push("/")}>
-            
+          <TouchableOpacity 
+            activeOpacity={0.8} 
+            style={styles.logoutButton} 
+            onPress={handleLogout}
+          >
             <Text style={styles.logoutText}>LOG OUT</Text>
           </TouchableOpacity>
         </View>
@@ -155,11 +243,16 @@ const styles = StyleSheet.create({
     elevation: 3,
     paddingVertical: verticalScale(20),
   },
-  profileImage: {
+  profileIcon: {
     width: moderateScale(90),
     height: moderateScale(90),
     borderRadius: moderateScale(50),
+    backgroundColor: "#f0f0f0",
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: verticalScale(10),
+    borderWidth: 2,
+    borderColor: "#e0e0e0",
   },
   profileName: {
     fontSize: moderateScale(16),
@@ -178,6 +271,11 @@ const styles = StyleSheet.create({
   profileEmail: {
     fontSize: moderateScale(12),
     color: "#777",
+    marginBottom: verticalScale(4),
+  },
+  profileShop: {
+    fontSize: moderateScale(12),
+    color: "#555",
     marginBottom: verticalScale(10),
   },
   logoutButton: {
