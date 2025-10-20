@@ -1,4 +1,4 @@
-// ✅ PickupDetails with full live GPS tracking (identical logic to MapScreen)
+// ✅ PickupDetails with live GPS tracking (no blinking marker, erases old trace)
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -43,7 +43,6 @@ export default function PickupDetails() {
   } | null>(null);
   const webViewRef = useRef<WebView>(null);
 
-  // ✅ Full live GPS logic from MapScreen
   useEffect(() => {
     let locationSubscription: Location.LocationSubscription | null = null;
 
@@ -61,7 +60,6 @@ export default function PickupDetails() {
           lng: current.coords.longitude,
         });
 
-        // Watch and update live GPS position
         locationSubscription = await Location.watchPositionAsync(
           {
             accuracy: Location.Accuracy.Highest,
@@ -104,102 +102,91 @@ export default function PickupDetails() {
     );
   }
 
-  // ✅ Map HTML identical to MapScreen logic (live GPS + circle + route)
-  const mapHTML = `
-  <!DOCTYPE html>
-  <html>
-    <head>
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-      <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
-      <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
-      <style>
-        html, body, #map { height: 100%; margin: 0; padding: 0; }
-        .leaflet-routing-container { display: none !important; }
+ const mapHTML = `
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+      html, body, #map { height: 100%; margin: 0; padding: 0; }
+      /* ✅ Static GPS circle (no pulse animation) */
+      .gps-circle {
+        width: 24px;
+        height: 24px;
+        background: rgba(0, 136, 255, 0.3);
+        border: 4px solid #007bff;
+        border-radius: 50%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script>
+      const destLat = ${lat};
+      const destLng = ${lng};
+      const startLat = ${initialLocation.lat};
+      const startLng = ${initialLocation.lng};
 
-        /* ✅ GPS circle identical to MapScreen */
-        .gps-circle {
-          width: 24px;
-          height: 24px;
-          background: rgba(0, 136, 255, 0.3);
-          border: 4px solid #007bff;
-          border-radius: 50%;
-        }
-        .pulse {
-          animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-          0% { transform: scale(1); opacity: 1; }
-          100% { transform: scale(2); opacity: 0; }
-        }
-      </style>
-    </head>
-    <body>
-      <div id="map"></div>
-      <script>
-        const destLat = ${lat};
-        const destLng = ${lng};
-        const startLat = ${initialLocation.lat};
-        const startLng = ${initialLocation.lng};
+      const map = L.map('map').setView([startLat, startLng], 15);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+      }).addTo(map);
 
-        const map = L.map('map').setView([startLat, startLng], 15);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          maxZoom: 19,
-        }).addTo(map);
+      const destMarker = L.marker([destLat, destLng]).addTo(map).bindPopup("Pickup Destination");
 
-        // ✅ Destination marker
-        const destMarker = L.marker([destLat, destLng]).addTo(map).bindPopup("Pickup Destination");
+      const gpsIcon = L.divIcon({
+        className: '',
+        html: '<div class="gps-circle"></div>', /* static marker */
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      });
 
-        // ✅ Live GPS circle marker
-        const gpsIcon = L.divIcon({
-          className: '',
-          html: '<div class="gps-circle pulse"></div>',
-          iconSize: [24, 24],
-          iconAnchor: [12, 12],
-        });
-        let userMarker = L.marker([startLat, startLng], { icon: gpsIcon }).addTo(map);
-        let routeControl = null;
+      let userMarker = L.marker([startLat, startLng], { icon: gpsIcon }).addTo(map);
+      let routeLine = null;
 
-        function drawRoute(fromLat, fromLng) {
-          if (routeControl) map.removeControl(routeControl);
-          routeControl = L.Routing.control({
-            waypoints: [
-              L.latLng(fromLat, fromLng),
-              L.latLng(destLat, destLng)
-            ],
-            lineOptions: { styles: [{ color: '#3864C3', weight: 5 }] },
-            addWaypoints: false,
-            draggableWaypoints: false,
-            fitSelectedRoutes: false,
-            show: false,
-          }).addTo(map);
-        }
-
-        drawRoute(startLat, startLng);
-
-        // ✅ Handle messages from React Native
-        document.addEventListener('message', (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            if (data.action === 'updateUserLocation') {
-              const { lat, lng } = data;
-              userMarker.setLatLng([lat, lng]);
-              // ❌ Removed map.panTo to stop auto-centering
-              drawRoute(lat, lng);
-            }
-          } catch (e) {
-            console.error("WebView message error:", e);
+      // ✅ Function to draw or update the route
+      async function drawRoute(lat, lng) {
+        try {
+          const response = await fetch(
+            \`https://router.project-osrm.org/route/v1/driving/\${lng},\${lat};\${destLng},\${destLat}?overview=full&geometries=geojson\`
+          );
+          const data = await response.json();
+          if (data.routes && data.routes.length > 0) {
+            const route = data.routes[0].geometry;
+            if (routeLine) map.removeLayer(routeLine);
+            routeLine = L.geoJSON(route, { color: '#3864C3', weight: 5 }).addTo(map);
           }
-        });
-      </script>
-    </body>
-  </html>
+        } catch (err) {
+          console.error("Route update error:", err);
+        }
+      }
+
+      // ✅ Initial route
+      drawRoute(startLat, startLng);
+
+      // ✅ Handle live user movement
+      document.addEventListener('message', (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.action === 'updateUserLocation') {
+            const { lat, lng } = data;
+            userMarker.setLatLng([lat, lng]);
+            drawRoute(lat, lng); // recalculate route for detours
+          }
+        } catch (e) {
+          console.error("WebView message error:", e);
+        }
+      });
+    </script>
+  </body>
+</html>
 `;
+
 
   return (
     <SafeAreaView style={[styles.container, { minHeight: height }]}>
-      {/* Header */}
       <View style={[styles.headerBox, { height: verticalScale(100) }]}>
         <Svg
           width={"100%"}
@@ -222,7 +209,6 @@ export default function PickupDetails() {
         </View>
       </View>
 
-      {/* Pickup Info */}
       <View style={styles.content}>
         <Text style={styles.forText}>For: {name}</Text>
 

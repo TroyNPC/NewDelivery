@@ -41,7 +41,6 @@ export default function DeliveryDetails() {
 
   const [initialLocation, setInitialLocation] = useState<{ lat: number; lng: number } | null>(null);
 
-  // ✅ Full live GPS logic from MapScreen
   useEffect(() => {
     let locationSubscription: Location.LocationSubscription | null = null;
 
@@ -102,7 +101,6 @@ export default function DeliveryDetails() {
     );
   }
 
-  // ✅ Map HTML identical to MapScreen logic (live GPS + circle + route)
   const mapHTML = `
   <!DOCTYPE html>
   <html>
@@ -115,21 +113,12 @@ export default function DeliveryDetails() {
       <style>
         html, body, #map { height: 100%; margin: 0; padding: 0; }
         .leaflet-routing-container { display: none !important; }
-
-        /* ✅ GPS circle identical to MapScreen */
         .gps-circle {
           width: 24px;
           height: 24px;
           background: rgba(0, 136, 255, 0.3);
           border: 4px solid #007bff;
           border-radius: 50%;
-        }
-        .pulse {
-          animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-          0% { transform: scale(1); opacity: 1; }
-          100% { transform: scale(2); opacity: 0; }
         }
       </style>
     </head>
@@ -142,48 +131,56 @@ export default function DeliveryDetails() {
         const startLng = ${initialLocation.lng};
 
         const map = L.map('map').setView([startLat, startLng], 15);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          maxZoom: 19,
-        }).addTo(map);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 
-        // ✅ Destination marker
         const destMarker = L.marker([destLat, destLng]).addTo(map).bindPopup("Destination");
 
-        // ✅ Live GPS circle marker
+        // ✅ User marker - no blinking now
         const gpsIcon = L.divIcon({
           className: '',
-          html: '<div class="gps-circle pulse"></div>',
+          html: '<div class="gps-circle"></div>',
           iconSize: [24, 24],
           iconAnchor: [12, 12],
         });
+
         let userMarker = L.marker([startLat, startLng], { icon: gpsIcon }).addTo(map);
         let routeControl = null;
 
-        function drawRoute(fromLat, fromLng) {
+        // ✅ Function for dynamic routing with detour recalculation
+        async function drawRoute(fromLat, fromLng) {
           if (routeControl) map.removeControl(routeControl);
-          routeControl = L.Routing.control({
-            waypoints: [
-              L.latLng(fromLat, fromLng),
-              L.latLng(destLat, destLng)
-            ],
-            lineOptions: { styles: [{ color: '#3864C3', weight: 5 }] },
-            addWaypoints: false,
-            draggableWaypoints: false,
-            fitSelectedRoutes: false,
-            show: false,
-          }).addTo(map);
+
+          try {
+            // Use OSRM for smarter detour-aware route recalculation
+            const url = \`https://router.project-osrm.org/route/v1/driving/\${fromLng},\${fromLat};\${destLng},\${destLat}?overview=full&geometries=geojson\`;
+            const res = await fetch(url);
+            const data = await res.json();
+
+            if (data.routes && data.routes.length > 0) {
+              const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+              const polyline = L.polyline(coords, { color: '#3864C3', weight: 5 }).addTo(map);
+
+              // Remove old route if any
+              if (routeControl && routeControl._line) {
+                map.removeLayer(routeControl._line);
+              }
+              routeControl = { _line: polyline };
+            }
+          } catch (e) {
+            console.error("Routing error:", e);
+          }
         }
 
         drawRoute(startLat, startLng);
 
-        // ✅ Handle messages from React Native
+        // ✅ Live update for user movement + detour-aware route recalculation
         document.addEventListener('message', (event) => {
           try {
             const data = JSON.parse(event.data);
             if (data.action === 'updateUserLocation') {
               const { lat, lng } = data;
               userMarker.setLatLng([lat, lng]);
-              drawRoute(lat, lng);
+              drawRoute(lat, lng); // Redraw based on detour-aware path
             }
           } catch (e) {
             console.error("WebView message error:", e);
@@ -201,7 +198,6 @@ export default function DeliveryDetails() {
 
   return (
     <SafeAreaView style={[styles.container, { minHeight: height }]}>
-      {/* HEADER */}
       <View style={[styles.headerBox, { height: verticalScale(100) }]}>
         <Svg
           width={"100%"}
@@ -221,7 +217,6 @@ export default function DeliveryDetails() {
         </View>
       </View>
 
-      {/* BODY */}
       <View style={styles.body}>
         <Text style={styles.forText}>For: {name}</Text>
 
@@ -242,7 +237,6 @@ export default function DeliveryDetails() {
           </Text>
         </View>
 
-        {/* MAP (persistent) */}
         <View style={styles.mapBox}>
           <WebView
             ref={webviewRef}
@@ -254,10 +248,7 @@ export default function DeliveryDetails() {
           />
         </View>
 
-        <TouchableOpacity
-          style={styles.confirmBtn}
-          onPress={() => alert(`Delivery for ${name} confirmed!`)}
-        >
+        <TouchableOpacity style={styles.confirmBtn} onPress={() => alert(`Delivery for ${name} confirmed!`)}>
           <Text style={styles.confirmText}>Confirm Delivery</Text>
         </TouchableOpacity>
 
@@ -288,7 +279,6 @@ export default function DeliveryDetails() {
   );
 }
 
-// 🧭 Styles unchanged
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
   headerBox: { width: "100%", backgroundColor: "#0AADFF", justifyContent: "center", overflow: "hidden" },

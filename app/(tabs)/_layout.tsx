@@ -1,3 +1,4 @@
+// app/(tabs)/_layout.tsx
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Tabs, useSegments } from "expo-router";
 import React from "react";
@@ -42,6 +43,10 @@ export default function TabLayout() {
         name="page/pickup/accepted/pickupreceived/[id]"
         options={{ href: null }}
       />
+      <Tabs.Screen
+        name="page/editprofile"
+        options={{ href: null }}
+      />
 
       {/* Main tabs */}
       <Tabs.Screen
@@ -82,11 +87,6 @@ export default function TabLayout() {
             <Ionicons name="person-circle" size={size} color={color} />
           ),
         }}
-      />
-
-      <Tabs.Screen
-        name="page/editprofile"
-        options={{ href: null }}
       />
     </Tabs>
   );

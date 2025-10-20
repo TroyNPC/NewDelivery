@@ -42,7 +42,6 @@ export default function DeliveryDetails() {
   } | null>(null);
   const webViewRef = useRef<WebView>(null);
 
-  // ✅ Full live GPS logic from MapScreen
   useEffect(() => {
     let locationSubscription: Location.LocationSubscription | null = null;
 
@@ -60,7 +59,6 @@ export default function DeliveryDetails() {
           lng: current.coords.longitude,
         });
 
-        // Watch and update live GPS position
         locationSubscription = await Location.watchPositionAsync(
           {
             accuracy: Location.Accuracy.Highest,
@@ -103,7 +101,6 @@ export default function DeliveryDetails() {
     );
   }
 
-  // ✅ Map HTML identical to MapScreen logic (live GPS + circle + route)
   const mapHTML = `
   <!DOCTYPE html>
   <html>
@@ -111,26 +108,15 @@ export default function DeliveryDetails() {
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
       <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-      <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
-      <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
       <style>
         html, body, #map { height: 100%; margin: 0; padding: 0; }
         .leaflet-routing-container { display: none !important; }
-
-        /* ✅ GPS circle identical to MapScreen */
         .gps-circle {
           width: 24px;
           height: 24px;
-          background: rgba(0, 136, 255, 0.3);
+          background: rgba(0, 136, 255, 0.5);
           border: 4px solid #007bff;
           border-radius: 50%;
-        }
-        .pulse {
-          animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-          0% { transform: scale(1); opacity: 1; }
-          100% { transform: scale(2); opacity: 0; }
         }
       </style>
     </head>
@@ -147,37 +133,33 @@ export default function DeliveryDetails() {
           maxZoom: 19,
         }).addTo(map);
 
-        // ✅ Destination marker
         const destMarker = L.marker([destLat, destLng]).addTo(map).bindPopup("Delivery Destination");
 
-        // ✅ Live GPS circle marker
         const gpsIcon = L.divIcon({
           className: '',
-          html: '<div class="gps-circle pulse"></div>',
+          html: '<div class="gps-circle"></div>',
           iconSize: [24, 24],
           iconAnchor: [12, 12],
         });
         let userMarker = L.marker([startLat, startLng], { icon: gpsIcon }).addTo(map);
-        let routeControl = null;
+        let routeLine = null;
 
-        function drawRoute(fromLat, fromLng) {
-          if (routeControl) map.removeControl(routeControl);
-          routeControl = L.Routing.control({
-            waypoints: [
-              L.latLng(fromLat, fromLng),
-              L.latLng(destLat, destLng)
-            ],
-            lineOptions: { styles: [{ color: '#3864C3', weight: 5 }] },
-            addWaypoints: false,
-            draggableWaypoints: false,
-            fitSelectedRoutes: false,
-            show: false,
-          }).addTo(map);
+        async function drawRoute(fromLat, fromLng) {
+          try {
+            const response = await fetch(
+              \`https://router.project-osrm.org/route/v1/driving/\${fromLng},\${fromLat};\${destLng},\${destLat}?overview=full&geometries=geojson\`
+            );
+            const json = await response.json();
+            const route = json.routes[0].geometry;
+            if (routeLine) map.removeLayer(routeLine);
+            routeLine = L.geoJSON(route, { color: '#3864C3', weight: 5 }).addTo(map);
+          } catch (err) {
+            console.error('Route fetch error:', err);
+          }
         }
 
         drawRoute(startLat, startLng);
 
-        // ✅ Handle messages from React Native
         document.addEventListener('message', (event) => {
           try {
             const data = JSON.parse(event.data);

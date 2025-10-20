@@ -44,7 +44,6 @@ export default function PickupDetails() {
     lng: number;
   } | null>(null);
 
-  // ✅ Full live GPS logic (copied exactly)
   useEffect(() => {
     let locationSubscription: Location.LocationSubscription | null = null;
 
@@ -56,13 +55,30 @@ export default function PickupDetails() {
           return;
         }
 
-        const current = await Location.getCurrentPositionAsync({});
+        let current = await Location.getCurrentPositionAsync({});
+
+        // ✅ Fallback near Dumaguete if no GPS signal (for Android Studio testing)
+        if (!current || !current.coords) {
+          console.log("No GPS signal, using fallback coordinates near Dumaguete");
+          current = {
+            coords: {
+              latitude: 9.3070,
+              longitude: 123.3027,
+              accuracy: 5,
+              altitude: 0,
+              heading: 0,
+              speed: 0,
+              altitudeAccuracy: 0,
+            },
+            timestamp: Date.now(),
+          };
+        }
+
         setInitialLocation({
           lat: current.coords.latitude,
           lng: current.coords.longitude,
         });
 
-        // Watch and update live GPS position
         locationSubscription = await Location.watchPositionAsync(
           {
             accuracy: Location.Accuracy.Highest,
@@ -108,7 +124,7 @@ export default function PickupDetails() {
     );
   }
 
-  // ✅ Exact map HTML copied from memorized logic
+  // ✅ Static GPS marker + Detour-aware route recalculation
   const mapHTML = `
   <!DOCTYPE html>
   <html>
@@ -116,26 +132,14 @@ export default function PickupDetails() {
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
       <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-      <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
-      <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
       <style>
         html, body, #map { height: 100%; margin: 0; padding: 0; }
-        .leaflet-routing-container { display: none !important; }
-
-        /* ✅ GPS circle identical to MapScreen */
         .gps-circle {
           width: 24px;
           height: 24px;
-          background: rgba(0, 136, 255, 0.3);
-          border: 4px solid #007bff;
+          background: rgba(0, 136, 255, 0.5);
+          border: 3px solid #007bff;
           border-radius: 50%;
-        }
-        .pulse {
-          animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-          0% { transform: scale(1); opacity: 1; }
-          100% { transform: scale(2); opacity: 0; }
         }
       </style>
     </head>
@@ -152,45 +156,40 @@ export default function PickupDetails() {
           maxZoom: 19,
         }).addTo(map);
 
-        // ✅ Destination marker
         const destMarker = L.marker([destLat, destLng]).addTo(map).bindPopup("Pickup Destination");
 
-        // ✅ Live GPS circle marker
         const gpsIcon = L.divIcon({
           className: '',
-          html: '<div class="gps-circle pulse"></div>',
+          html: '<div class="gps-circle"></div>',
           iconSize: [24, 24],
           iconAnchor: [12, 12],
         });
-        let userMarker = L.marker([startLat, startLng], { icon: gpsIcon }).addTo(map);
-        let routeControl = null;
 
-        function drawRoute(fromLat, fromLng) {
-          if (routeControl) map.removeControl(routeControl);
-          routeControl = L.Routing.control({
-            waypoints: [
-              L.latLng(fromLat, fromLng),
-              L.latLng(destLat, destLng)
-            ],
-            lineOptions: { styles: [{ color: '#3864C3', weight: 5 }] },
-            addWaypoints: false,
-            draggableWaypoints: false,
-            fitSelectedRoutes: false,
-            show: false,
-          }).addTo(map);
+        let userMarker = L.marker([startLat, startLng], { icon: gpsIcon }).addTo(map);
+        let routeLine = null;
+
+        async function drawRoute(lat1, lng1, lat2, lng2) {
+          try {
+            const res = await fetch(\`https://router.project-osrm.org/route/v1/driving/\${lng1},\${lat1};\${lng2},\${lat2}?overview=full&geometries=geojson\`);
+            const json = await res.json();
+            const coords = json.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+            if (routeLine) map.removeLayer(routeLine);
+            routeLine = L.polyline(coords, { color: '#3864C3', weight: 5 }).addTo(map);
+            map.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
+          } catch (e) {
+            console.error("Route error:", e);
+          }
         }
 
-        drawRoute(startLat, startLng);
+        drawRoute(startLat, startLng, destLat, destLng);
 
-        // ✅ Handle messages from React Native
-        document.addEventListener('message', (event) => {
+        document.addEventListener('message', async (event) => {
           try {
             const data = JSON.parse(event.data);
             if (data.action === 'updateUserLocation') {
               const { lat, lng } = data;
               userMarker.setLatLng([lat, lng]);
-              // ❌ Removed map.panTo to stop auto-centering
-              drawRoute(lat, lng);
+              drawRoute(lat, lng, destLat, destLng);
             }
           } catch (e) {
             console.error("WebView message error:", e);
@@ -199,7 +198,7 @@ export default function PickupDetails() {
       </script>
     </body>
   </html>
-`;
+  `;
 
   const handleCall = () => {
     if (number) Linking.openURL(`tel:${number}`);
@@ -208,7 +207,6 @@ export default function PickupDetails() {
 
   return (
     <SafeAreaView style={[styles.container, { minHeight: height }]}>
-      {/* Header */}
       <View style={[styles.headerBox, { height: verticalScale(100) }]}>
         <Svg
           width={"100%"}
@@ -249,7 +247,6 @@ export default function PickupDetails() {
         </View>
       </View>
 
-      {/* Content */}
       <View style={styles.body}>
         <Text style={styles.forText}>For: {name}</Text>
 

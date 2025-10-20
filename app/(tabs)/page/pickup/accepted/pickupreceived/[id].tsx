@@ -46,7 +46,6 @@ export default function PickupReceived() {
     })
   );
 
-  // ✅ Live GPS tracking logic (same as original request)
   useEffect(() => {
     let locationSubscription: Location.LocationSubscription | null = null;
 
@@ -65,7 +64,6 @@ export default function PickupReceived() {
         };
         setInitialLocation(coords);
 
-        // Watch for live updates
         locationSubscription = await Location.watchPositionAsync(
           {
             accuracy: Location.Accuracy.Highest,
@@ -108,7 +106,6 @@ export default function PickupReceived() {
     );
   }
 
-  // ✅ Map HTML (LIVE GPS → destination route)
   const mapHTML = `
   <!DOCTYPE html>
   <html>
@@ -116,25 +113,16 @@ export default function PickupReceived() {
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
       <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-      <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
-      <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
       <style>
         html, body, #map { height: 100%; margin: 0; padding: 0; }
         .leaflet-routing-container { display: none !important; }
-
+        /* ✅ Static GPS circle (no blinking or pulse) */
         .gps-circle {
           width: 24px;
           height: 24px;
           background: rgba(0, 136, 255, 0.3);
           border: 4px solid #007bff;
           border-radius: 50%;
-        }
-        .pulse {
-          animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-          0% { transform: scale(1); opacity: 1; }
-          100% { transform: scale(2); opacity: 0; }
         }
       </style>
     </head>
@@ -151,37 +139,39 @@ export default function PickupReceived() {
           maxZoom: 19,
         }).addTo(map);
 
-        // ✅ Destination marker
-        const destMarker = L.marker([destLat, destLng]).addTo(map).bindPopup("Destination");
+        const destMarker = L.marker([destLat, destLng]).addTo(map).bindPopup("Pickup Destination");
 
-        // ✅ Rider live GPS marker
         const gpsIcon = L.divIcon({
           className: '',
-          html: '<div class="gps-circle pulse"></div>',
+          html: '<div class="gps-circle"></div>',
           iconSize: [24, 24],
           iconAnchor: [12, 12],
         });
         let userMarker = L.marker([startLat, startLng], { icon: gpsIcon }).addTo(map);
-        let routeControl = null;
 
-        function drawRoute(fromLat, fromLng) {
-          if (routeControl) map.removeControl(routeControl);
-          routeControl = L.Routing.control({
-            waypoints: [
-              L.latLng(fromLat, fromLng),
-              L.latLng(destLat, destLng)
-            ],
-            lineOptions: { styles: [{ color: '#3864C3', weight: 5 }] },
-            addWaypoints: false,
-            draggableWaypoints: false,
-            fitSelectedRoutes: false,
-            show: false,
-          }).addTo(map);
+        let routeLine = null;
+
+        // ✅ Function to draw or update route (detour-aware)
+        async function drawRoute(lat, lng) {
+          try {
+            const response = await fetch(
+              \`https://router.project-osrm.org/route/v1/driving/\${lng},\${lat};\${destLng},\${destLat}?overview=full&geometries=geojson\`
+            );
+            const data = await response.json();
+            if (data.routes && data.routes.length > 0) {
+              const route = data.routes[0].geometry;
+              if (routeLine) map.removeLayer(routeLine);
+              routeLine = L.geoJSON(route, { color: '#3864C3', weight: 5 }).addTo(map);
+            }
+          } catch (err) {
+            console.error("Route update error:", err);
+          }
         }
 
+        // ✅ Initial route
         drawRoute(startLat, startLng);
 
-        // ✅ Handle messages from React Native (live update)
+        // ✅ Live updates: move marker + recalc route
         document.addEventListener('message', (event) => {
           try {
             const data = JSON.parse(event.data);
