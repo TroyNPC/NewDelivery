@@ -1,89 +1,62 @@
 // app/(tabs)/_layout.tsx
-import Ionicons from "@expo/vector-icons/Ionicons";
-import { Tabs, useSegments } from "expo-router";
-import React from "react";
-
-import { Colors } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { Colors } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Ionicons } from '@expo/vector-icons';
+import { Tabs, useSegments } from 'expo-router';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const segments = useSegments();
   const currentRoute = segments[segments.length - 1];
 
-  // Check if user is on either deliveries.tsx, pickups.tsx, or history.tsx
-  const isMainTab =
-    currentRoute === "deliveries" ||
-    currentRoute === "pickups" ||
-    currentRoute === "history" ||
-    currentRoute === "user";
+  // Show tab bar only on main tabs
+  const isMainTab = ['deliveries', 'pickups', 'history', 'user'].includes(currentRoute);
 
   return (
-    <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? "light"].tint,
+    <Tabs 
+      screenOptions={{ 
         headerShown: false,
-        // Show tab bar only on deliveries, pickups, history, or user pages
-        tabBarStyle: { display: isMainTab ? "flex" : "none" },
+        tabBarActiveTintColor: Colors[colorScheme ?? "light"].tint,
+        tabBarStyle: { display: isMainTab ? 'flex' : 'none' },
       }}
     >
-      {/* Hidden screens */}
       <Tabs.Screen name="index" options={{ href: null }} />
-      <Tabs.Screen name="explore" options={{ href: null }} />
-      <Tabs.Screen name="page/delivery/[id]" options={{ href: null }} />
-      <Tabs.Screen name="page/pickup/[id]" options={{ href: null }} />
-      <Tabs.Screen name="page/delivery/accepted/[id]" options={{ href: null }} />
-      <Tabs.Screen name="page/pickup/accepted/[id]" options={{ href: null }} />
-      <Tabs.Screen name="page/changepassword" options={{ href: null }} />
+      
       <Tabs.Screen
-        name="page/delivery/accepted/noresponse/[id]noresponse"
-        options={{ href: null }}
-      />
-      <Tabs.Screen
-        name="page/pickup/accepted/pickupreceived/[id]"
-        options={{ href: null }}
-      />
-      <Tabs.Screen
-        name="page/editprofile"
-        options={{ href: null }}
-      />
-
-      {/* Main tabs */}
-      <Tabs.Screen
-        name="page/deliveries"
+        name="deliveries"
         options={{
-          title: "Deliveries",
-          tabBarIcon: ({ color, size }) => (
+          title: 'Deliveries',
+          tabBarIcon: ({ size, color }) => (
             <Ionicons name="bicycle" size={size} color={color} />
           ),
         }}
       />
-
+      
       <Tabs.Screen
-        name="page/pickups"
+        name="pickups"
         options={{
-          title: "Pickups",
-          tabBarIcon: ({ color, size }) => (
+          title: 'Pickups',
+          tabBarIcon: ({ size, color }) => (
             <Ionicons name="cube" size={size} color={color} />
           ),
         }}
       />
 
       <Tabs.Screen
-        name="page/history"
+        name="history"
         options={{
-          title: "History",
-          tabBarIcon: ({ color, size }) => (
+          title: 'History',
+          tabBarIcon: ({ size, color }) => (
             <Ionicons name="time" size={size} color={color} />
           ),
         }}
       />
 
       <Tabs.Screen
-        name="page/user"
+        name="user"
         options={{
-          title: "User",
-          tabBarIcon: ({ color, size }) => (
+          title: 'User',
+          tabBarIcon: ({ size, color }) => (
             <Ionicons name="person-circle" size={size} color={color} />
           ),
         }}

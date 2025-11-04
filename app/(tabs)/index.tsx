@@ -6,14 +6,16 @@ import {
   Dimensions,
   Image,
   ImageBackground,
+  Keyboard,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { scale, verticalScale } from "react-native-size-matters";
 import Svg, { Path } from "react-native-svg";
 import { supabase } from "../../hooks/supabaseClient";
 
@@ -24,457 +26,506 @@ export default function HomeScreen() {
     email: "",
     password: "",
   });
-
-  // Track screen size dynamically
-  const [screen, setScreen] = useState(Dimensions.get("window"));
+  const [errors, setErrors] = useState({
+    email: "",
+    password: "",
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [dimensions, setDimensions] = useState(Dimensions.get("window"));
 
   useEffect(() => {
     const subscription = Dimensions.addEventListener("change", ({ window }) => {
-      setScreen(window);
+      setDimensions(window);
     });
     return () => subscription?.remove();
   }, []);
 
+  // Responsive scaling functions
+  const scale = (size: number) => {
+    const { width } = dimensions;
+    const baseWidth = 375; // iPhone 6/7/8 width
+    return (size * width) / baseWidth;
+  };
+
+  const verticalScale = (size: number) => {
+    const { height } = dimensions;
+    const baseHeight = 667; // iPhone 6/7/8 height
+    return (size * height) / baseHeight;
+  };
+
+  const moderateScale = (size: number, factor = 0.5) => {
+    return size + (scale(size) - size) * factor;
+  };
+
   // Check if user is already logged in
   useEffect(() => {
-    console.log("🔄 HomeScreen mounted - checking user session");
-    checkUser();
+    checkUserSession();
   }, []);
 
-  const checkUser = async () => {
+  const checkUserSession = async () => {
     try {
-      console.log("🔍 Checking if user is already logged in...");
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      const { data: { user }, error } = await supabase.auth.getUser();
       
-      if (userError) {
-        console.log("❌ Error getting user:", userError);
-        return;
-      }
-
-      console.log("👤 User found:", user ? user.id : "No user");
-      
-      if (user) {
-        console.log("📋 Checking shop_user_assignments for user:", user.id);
-        
-        // Get user's role and assignment details
-        const { data: userData, error } = await supabase
-          .from('shop_user_assignments')
-          .select(`
-            *,
-            shop:shops(name, logo_url),
-            branch:shop_branches(name, address),
-            user:users(full_name, phone, email)
-          `)
-          .eq('user_id', user.id)
-          .eq('is_active', true)
-          .single();
-
-        console.log("📊 Assignment query result:", {
-          hasData: !!userData,
-          data: userData,
-          error: error
-        });
-
-        if (error) {
-          console.log("❌ Assignment query error:", error);
-          console.log("📝 Error details:", {
-            code: error.code,
-            message: error.message,
-            details: error.details
-          });
-        }
-
-        if (userData && (userData.role_in_shop === 'delivery' || userData.role_in_shop === 'driver')) {
-          console.log("✅ User is a delivery person!");
-          console.log("👤 User role:", userData.role_in_shop);
-          console.log("🏪 Shop:", userData.shop?.name);
-          console.log("📍 Branch:", userData.branch?.name);
-          
-          // Store user assignment data and navigate
-          const userInfo = {
-            id: user.id,
-            full_name: userData.user?.full_name,
-            email: userData.user?.email,
-            phone: userData.user?.phone,
-            role: userData.role_in_shop,
-            shop: userData.shop,
-            branch: userData.branch,
-            assignment_id: userData.id
-          };
-          
-          console.log("💾 User info to store:", userInfo);
-          console.log("🚀 Navigating to deliveries page...");
-          router.replace("/page/deliveries");
+      if (user && !error) {
+        const isDeliveryPerson = await checkDeliveryRole(user.id);
+        if (isDeliveryPerson) {
+          router.replace("/deliveries");
         } else {
-          console.log("❌ User is not a delivery person or no assignment found");
-          console.log("📝 Assignment data:", userData);
+          await supabase.auth.signOut();
         }
-      } else {
-        console.log("👤 No user logged in");
       }
     } catch (error) {
-      console.log("💥 Unexpected error in checkUser:", error);
+      console.log("Session check error:", error);
     }
   };
 
+  const checkDeliveryRole = async (userId: string): Promise<boolean> => {
+    try {
+      const { data: assignment, error } = await supabase
+        .from('shop_user_assignments')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('role_in_shop', 'delivery')
+        .eq('is_active', true)
+        .single();
+
+      if (error) {
+        console.log("Assignment check error:", error);
+        return false;
+      }
+
+      return !!assignment;
+    } catch (error) {
+      console.log("Role check error:", error);
+      return false;
+    }
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors = { email: "", password: "" };
+    let isValid = true;
+
+    if (!credentials.email) {
+      newErrors.email = "Email is required";
+      isValid = false;
+    } else if (!/\S+@\S+\.\S+/.test(credentials.email)) {
+      newErrors.email = "Please enter a valid email address";
+      isValid = false;
+    }
+
+    if (!credentials.password) {
+      newErrors.password = "Password is required";
+      isValid = false;
+    }
+
+    setErrors(newErrors);
+    return isValid;
+  };
+
   const handleLogin = async () => {
-    console.log("🔐 Login attempt with email:", credentials.email);
-    
-    if (!credentials.email || !credentials.password) {
-      console.log("❌ Missing credentials");
-      Alert.alert("Error", "Please enter both email and password");
+    Keyboard.dismiss();
+
+    if (!validateForm()) {
       return;
     }
 
     setLoading(true);
+
     try {
-      console.log("🔑 Signing in with Supabase Auth...");
-      
-      // Sign in with Supabase Auth
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: credentials.email,
+        email: credentials.email.trim().toLowerCase(),
         password: credentials.password,
       });
 
-      console.log("📨 Auth response:", {
-        hasUser: !!data?.user,
-        error: error
-      });
-
       if (error) {
-        console.log("❌ Auth error:", error);
-        Alert.alert("Login Error", error.message);
+        Alert.alert(
+          "Login Failed", 
+          error.message === "Invalid login credentials" 
+            ? "The email or password you entered is incorrect. Please try again."
+            : error.message
+        );
         return;
       }
 
       if (data.user) {
-        console.log("✅ Auth successful! User ID:", data.user.id);
-        console.log("📋 Checking user assignments...");
-
-        // Get user's role and assignment details
-        const { data: userAssignment, error: assignmentError } = await supabase
-          .from('shop_user_assignments')
-          .select(`
-            *,
-            shop:shops(name, logo_url),
-            branch:shop_branches(name, address),
-            user:users(full_name, phone, email)
-          `)
-          .eq('user_id', data.user.id)
-          .eq('is_active', true)
-          .single();
-
-        console.log("📊 Assignment query result:", {
-          hasAssignment: !!userAssignment,
-          assignment: userAssignment,
-          error: assignmentError
-        });
-
-        if (assignmentError) {
-          console.log("❌ Assignment query failed:", assignmentError);
-          console.log("📝 Assignment error details:", {
-            code: assignmentError.code,
-            message: assignmentError.message,
-            details: assignmentError.details
-          });
-          
-          console.log("🔄 Trying fallback: checking user_roles table...");
-          
-          // Fallback: Check user_roles table
-          const { data: userRoles, error: rolesError } = await supabase
-            .from('user_roles')
-            .select(`
-              role:roles(name)
-            `)
-            .eq('user_id', data.user.id)
-            .single();
-
-          console.log("📊 User roles result:", {
-            hasRoles: !!userRoles,
-            roles: userRoles,
-            error: rolesError
-          });
-
-          const userRole = userRoles?.role?.name;
-          console.log("🎭 User role from fallback:", userRole);
-          
-          if (userRole === 'delivery' || userRole === 'driver') {
-            console.log("✅ Fallback check passed! User has delivery role");
-            
-            // Get basic user info
-            const { data: userInfo, error: userInfoError } = await supabase
-              .from('users')
-              .select('full_name, phone, email')
-              .eq('id', data.user.id)
-              .single();
-
-            console.log("📝 User info query result:", {
-              hasUserInfo: !!userInfo,
-              userInfo: userInfo,
-              error: userInfoError
-            });
-
-            const userData = {
-              id: data.user.id,
-              full_name: userInfo?.full_name,
-              email: userInfo?.email,
-              phone: userInfo?.phone,
-              role: userRole,
-              shop: null,
-              branch: null,
-              assignment_id: null
-            };
-            
-            console.log("💾 User data to store:", userData);
-            console.log("🚀 Navigating to deliveries page...");
-            router.replace("/page/deliveries");
-          } else {
-            console.log("❌ User is not a delivery person in any system");
-            Alert.alert("Access Denied", "This app is for delivery personnel only");
-            console.log("🚪 Signing user out...");
-            await supabase.auth.signOut();
-          }
-        } else if (userAssignment && (userAssignment.role_in_shop === 'delivery' || userAssignment.role_in_shop === 'driver')) {
-          console.log("✅ User is a delivery person in shop assignments!");
-          console.log("👤 Role:", userAssignment.role_in_shop);
-          console.log("🏪 Shop:", userAssignment.shop?.name);
-          console.log("📍 Branch:", userAssignment.branch?.name);
-          
-          // Success - store user data and navigate
-          const userInfo = {
-            id: data.user.id,
-            full_name: userAssignment.user?.full_name,
-            email: userAssignment.user?.email,
-            phone: userAssignment.user?.phone,
-            role: userAssignment.role_in_shop,
-            shop: userAssignment.shop,
-            branch: userAssignment.branch,
-            assignment_id: userAssignment.id
-          };
-          
-          console.log("💾 User assignment details:", userInfo);
-          console.log("🚀 Navigating to deliveries page...");
-          router.replace("/page/deliveries");
+        const isDeliveryPerson = await checkDeliveryRole(data.user.id);
+        
+        if (isDeliveryPerson) {
+          router.replace("/deliveries");
         } else {
-          console.log("❌ User assignment found but not a delivery role");
-          console.log("📝 Actual role:", userAssignment?.role_in_shop);
-          Alert.alert("Access Denied", "This app is for delivery personnel only");
-          console.log("🚪 Signing user out...");
+          Alert.alert(
+            "Access Restricted", 
+            "This application is exclusively for delivery partners."
+          );
           await supabase.auth.signOut();
         }
       }
     } catch (error: any) {
-      console.log("💥 Unexpected error in handleLogin:", error);
-      Alert.alert("Login Error", error.message || "An unexpected error occurred");
+      console.log("Login error:", error);
+      Alert.alert(
+        "Connection Issue", 
+        "Unable to connect to the server. Please check your internet connection."
+      );
     } finally {
-      console.log("🏁 Login process completed");
       setLoading(false);
     }
   };
 
-  const svgHeight = screen.height * 0.25;
-  const vbW = 1440;
-  const vbH = 320;
+  const handleInputChange = (field: string, value: string) => {
+    setCredentials(prev => ({ ...prev, [field]: value }));
+    if (errors[field as keyof typeof errors]) {
+      setErrors(prev => ({ ...prev, [field]: "" }));
+    }
+  };
+
+  const handlePasswordSubmit = () => {
+    handleLogin();
+  };
+
+  // Responsive styles based on screen dimensions
+  const responsiveStyles = createResponsiveStyles(dimensions, scale, verticalScale, moderateScale);
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: "#0AADFF" }]}>
-      {/* ===== Top Wave ===== */}
-      <Svg
-        width={screen.width}
-        height={verticalScale(300)}
-        viewBox={`0 0 ${vbW} ${vbH}`}
-        style={styles.topWave}
-        preserveAspectRatio="none"
-      >
-        <Path
-          fill="#355fc7"
-          d={`M0,0 L0,${vbH * 0.3} C ${vbW * 0.3},${vbH * 0.1} ${vbW * 0.6},${vbH * 0.8} ${vbW},${vbH * 0.7} L${vbW},0 Z`}
-        />
-      </Svg>
-
-      {/* ===== Content (Full Screen, No Scroll) ===== */}
-      <View
-        style={[
-          styles.content,
-          { width: screen.width, height: screen.height },
-        ]}
-      >
-        {/* Icon */}
-        <ImageBackground style={styles.ovalBackground} imageStyle={styles.ovalShape}>
-          <Image
-            source={require("../../assets/images/delivery.png")}
-            style={styles.icon}
-            resizeMode="contain"
-          />
-        </ImageBackground>
-
-        {/* Title */}
-        <Text style={styles.title} adjustsFontSizeToFit numberOfLines={2}>
-          LaundryGo Delivery
-        </Text>
-
-        {/* Login Box */}
-        <View
-          style={[
-            styles.loginBox,
-            { height: screen.height * 0.50 },
-          ]}
-        >
-          <Text style={styles.loginTitle}>Log in to your Account</Text>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Email:</Text>
-            <View style={styles.inputField}>
-              <TextInput
-                style={styles.placeholderText}
-                placeholder="Enter your email"
-                placeholderTextColor="gray"
-                value={credentials.email}
-                onChangeText={(text) => setCredentials(prev => ({ ...prev, email: text }))}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                editable={!loading}
-              />
-            </View>
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Password:</Text>
-            <View style={styles.inputField}>
-              <TextInput
-                style={styles.placeholderText}
-                placeholder="Enter your password"
-                placeholderTextColor="gray"
-                secureTextEntry
-                value={credentials.password}
-                onChangeText={(text) => setCredentials(prev => ({ ...prev, password: text }))}
-                editable={!loading}
-              />
-            </View>
-          </View>
-
-          <TouchableOpacity
-            style={[styles.loginButton, loading && styles.loginButtonDisabled]}
-            onPress={handleLogin}
-            disabled={loading}
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <SafeAreaView style={responsiveStyles.container}>
+        {/* Background Wave */}
+        <View style={responsiveStyles.waveContainer}>
+          <Svg
+            width={dimensions.width}
+            height={verticalScale(200)}
+            viewBox="0 0 1440 320"
+            preserveAspectRatio="xMidYMid slice"
           >
-            {loading ? (
-              <ActivityIndicator color="white" />
-            ) : (
-              <Text style={styles.loginButtonText}>Log In</Text>
-            )}
-          </TouchableOpacity>
-
+            <Path
+              fill="#355fc7"
+              d="M0,96L48,112C96,128,192,160,288,186.7C384,213,480,235,576,213.3C672,192,768,128,864,128C960,128,1056,192,1152,197.3C1248,203,1344,149,1392,122.7L1440,96L1440,0L1392,0C1344,0,1248,0,1152,0C1056,0,960,0,864,0C768,0,672,0,576,0C480,0,384,0,288,0C192,0,96,0,48,0L0,0Z"
+            />
+          </Svg>
         </View>
-      </View>
-    </SafeAreaView>
+
+        <ScrollView 
+          contentContainerStyle={responsiveStyles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Branding Section */}
+          <View style={responsiveStyles.brandingSection}>
+            <ImageBackground 
+              style={responsiveStyles.logoContainer}
+              imageStyle={responsiveStyles.logoImageStyle}
+            >
+              <Image
+                source={require("../../assets/images/delivery.png")}
+                style={responsiveStyles.logo}
+                resizeMode="contain"
+              />
+            </ImageBackground>
+
+            <View style={responsiveStyles.titleContainer}>
+              <Text style={responsiveStyles.title} numberOfLines={2}>
+                LaundryGo Delivery
+              </Text>
+              <Text style={responsiveStyles.subtitle}>
+                Partner Portal
+              </Text>
+            </View>
+          </View>
+
+          {/* Login Form Section */}
+          <View style={responsiveStyles.loginBox}>
+            <View style={responsiveStyles.loginHeader}>
+              <Text style={responsiveStyles.loginTitle}>Welcome Back</Text>
+              <Text style={responsiveStyles.loginSubtitle}>
+                Sign in to continue to your delivery dashboard
+              </Text>
+            </View>
+
+            <View style={responsiveStyles.formContainer}>
+              {/* Email Input */}
+              <View style={responsiveStyles.inputGroup}>
+                <Text style={responsiveStyles.inputLabel}>Email Address</Text>
+                <View style={[
+                  responsiveStyles.inputField,
+                  errors.email && responsiveStyles.inputFieldError,
+                ]}>
+                  <TextInput
+                    style={responsiveStyles.inputText}
+                    placeholder="Enter your email"
+                    placeholderTextColor="#999"
+                    value={credentials.email}
+                    onChangeText={(text) => handleInputChange("email", text)}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="email-address"
+                    textContentType="emailAddress"
+                    editable={!loading}
+                    returnKeyType="next"
+                  />
+                </View>
+                {errors.email ? (
+                  <Text style={responsiveStyles.errorText}>{errors.email}</Text>
+                ) : null}
+              </View>
+
+              {/* Password Input */}
+              <View style={responsiveStyles.inputGroup}>
+                <Text style={responsiveStyles.inputLabel}>Password</Text>
+                <View style={[
+                  responsiveStyles.inputField,
+                  errors.password && responsiveStyles.inputFieldError,
+                ]}>
+                  <TextInput
+                    style={responsiveStyles.inputText}
+                    placeholder="Enter your password"
+                    placeholderTextColor="#999"
+                    secureTextEntry={!showPassword}
+                    value={credentials.password}
+                    onChangeText={(text) => handleInputChange("password", text)}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    textContentType="password"
+                    editable={!loading}
+                    returnKeyType="done"
+                    onSubmitEditing={handlePasswordSubmit}
+                  />
+                  <TouchableOpacity
+                    onPress={() => setShowPassword(!showPassword)}
+                    style={responsiveStyles.visibilityToggle}
+                  >
+                    <Text style={responsiveStyles.visibilityText}>
+                      {showPassword ? "Hide" : "Show"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                {errors.password ? (
+                  <Text style={responsiveStyles.errorText}>{errors.password}</Text>
+                ) : null}
+              </View>
+
+              {/* Login Button */}
+              <TouchableOpacity
+                style={[
+                  responsiveStyles.loginButton,
+                  loading && responsiveStyles.loginButtonDisabled,
+                  (!credentials.email || !credentials.password) && responsiveStyles.loginButtonDisabled
+                ]}
+                onPress={handleLogin}
+                disabled={loading || !credentials.email || !credentials.password}
+              >
+                {loading ? (
+                  <View style={responsiveStyles.buttonContent}>
+                    <ActivityIndicator color="white" size="small" />
+                    <Text style={responsiveStyles.loginButtonText}>Signing In...</Text>
+                  </View>
+                ) : (
+                  <Text style={responsiveStyles.loginButtonText}>Sign In</Text>
+                )}
+              </TouchableOpacity>
+
+              {/* Support Text */}
+              <View style={responsiveStyles.supportContainer}>
+                <Text style={responsiveStyles.supportText}>
+                  Need help? Contact{" "}
+                  <Text style={responsiveStyles.supportLink}>delivery-support@laundrygo.com</Text>
+                </Text>
+              </View>
+            </View>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    </TouchableWithoutFeedback>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  topWave: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-  },
-  ovalBackground: {
-    width: scale(200),
-    height: verticalScale(180),
-    backgroundColor: "white",
-    justifyContent: "center",
-    alignItems: "center",
-    borderRadius: scale(300),
-    overflow: "hidden",
-    alignSelf: "center",
-    marginTop: verticalScale(-5),
-  },
-  ovalShape: {
-    borderRadius: scale(150),
-  },
-  icon: {
-    width: scale(330),
-    height: verticalScale(210),
-    marginTop: verticalScale(-10),
-  },
-  title: {
-    fontSize: scale(45),
-    fontWeight: "bold",
-    color: "white",
-    textAlign: "center",
-    width: "80%",
-    marginBottom: verticalScale(25),
-  },
-  loginBox: {
-    backgroundColor: "white",
-    width: "100%",
-    borderTopLeftRadius: 25,
-    borderTopRightRadius: 25,
-    paddingVertical: verticalScale(25),
-    paddingHorizontal: scale(25),
-    alignItems: "center",
-    marginTop: verticalScale(15),
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
-    elevation: 3,
-  },
-  loginTitle: {
-    fontSize: scale(18),
-    fontWeight: "bold",
-    color: "black",
-    marginBottom: verticalScale(20),
-  },
-  inputGroup: {
-    width: "100%",
-    marginBottom: verticalScale(15),
-  },
-  inputLabel: {
-    color: "#355fc7",
-    fontWeight: "600",
-    fontSize: scale(14),
-    marginBottom: verticalScale(5),
-  },
-  inputField: {
-    width: "100%",
-    backgroundColor: "#F3F3F3",
-    borderRadius: 8,
-    paddingVertical: verticalScale(10),
-    paddingHorizontal: scale(10),
-  },
-  placeholderText: {
-    color: "gray",
-    fontSize: scale(14),
-  },
-  loginButton: {
-    backgroundColor: "#0AADFF",
-    marginTop: verticalScale(10),
-    paddingVertical: verticalScale(12),
-    paddingHorizontal: scale(100),
-    borderRadius: 40,
-    alignItems: "center",
-    width: "100%",
-  },
-  loginButtonDisabled: {
-    backgroundColor: "#87CEFA",
-  },
-  loginButtonText: {
-    color: "white",
-    fontSize: scale(18),
-    fontWeight: "bold",
-  },
-  forgotPassword: {
-    marginTop: verticalScale(15),
-  },
-  forgotPasswordText: {
-    color: "#355fc7",
-    fontSize: scale(14),
-    textDecorationLine: "underline",
-  },
-});
+const createResponsiveStyles = (dimensions: any, scale: any, verticalScale: any, moderateScale: any) => {
+  const { width, height } = dimensions;
+  const isSmallScreen = width < 375;
+  const isLargeScreen = width > 414;
+  const isTablet = width > 768;
+
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: "#0AADFF",
+    },
+    waveContainer: {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+    },
+    scrollContent: {
+      flexGrow: 1,
+      justifyContent: "center",
+      minHeight: height,
+    },
+    brandingSection: {
+      alignItems: "center",
+      paddingHorizontal: moderateScale(20),
+      marginTop: isTablet ? verticalScale(40) : verticalScale(20),
+      marginBottom: verticalScale(10),
+    },
+    logoContainer: {
+      width: isTablet ? scale(180) : isSmallScreen ? scale(120) : scale(150),
+      height: isTablet ? verticalScale(160) : isSmallScreen ? verticalScale(120) : verticalScale(140),
+      backgroundColor: "white",
+      justifyContent: "center",
+      alignItems: "center",
+      borderRadius: scale(300),
+      overflow: "hidden",
+    },
+    logoImageStyle: {
+      borderRadius: scale(150),
+    },
+    logo: {
+      width: isTablet ? scale(280) : isSmallScreen ? scale(200) : scale(250),
+      height: isTablet ? verticalScale(180) : isSmallScreen ? verticalScale(140) : verticalScale(160),
+      marginTop: verticalScale(-10),
+    },
+    titleContainer: {
+      alignItems: "center",
+      marginTop: verticalScale(10),
+    },
+    title: {
+      fontSize: isTablet ? moderateScale(36) : isSmallScreen ? moderateScale(28) : moderateScale(32),
+      fontWeight: "bold",
+      color: "white",
+      textAlign: "center",
+      marginBottom: verticalScale(5),
+    },
+    subtitle: {
+      fontSize: isTablet ? moderateScale(18) : isSmallScreen ? moderateScale(14) : moderateScale(16),
+      color: "white",
+      textAlign: "center",
+      opacity: 0.9,
+    },
+    loginBox: {
+      backgroundColor: "white",
+      marginTop: "auto",
+      borderTopLeftRadius: 30,
+      borderTopRightRadius: 30,
+      paddingVertical: isTablet ? verticalScale(40) : verticalScale(25),
+      paddingHorizontal: isTablet ? scale(40) : scale(25),
+      marginHorizontal: isTablet ? scale(20) : 0,
+      shadowColor: "#000",
+      shadowOffset: {
+        width: 0,
+        height: -2,
+      },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 5,
+      minHeight: height * 0.5,
+    },
+    loginHeader: {
+      alignItems: "center",
+      marginBottom: isTablet ? verticalScale(35) : verticalScale(25),
+    },
+    loginTitle: {
+      fontSize: isTablet ? moderateScale(28) : isSmallScreen ? moderateScale(20) : moderateScale(24),
+      fontWeight: "bold",
+      color: "#1a1a1a",
+      marginBottom: verticalScale(8),
+    },
+    loginSubtitle: {
+      fontSize: isTablet ? moderateScale(16) : isSmallScreen ? moderateScale(12) : moderateScale(14),
+      color: "#666",
+      textAlign: "center",
+      lineHeight: moderateScale(20),
+    },
+    formContainer: {
+      width: "100%",
+    },
+    inputGroup: {
+      width: "100%",
+      marginBottom: isTablet ? verticalScale(25) : verticalScale(20),
+    },
+    inputLabel: {
+      color: "#355fc7",
+      fontWeight: "600",
+      fontSize: isTablet ? moderateScale(16) : isSmallScreen ? moderateScale(12) : moderateScale(14),
+      marginBottom: verticalScale(8),
+    },
+    inputField: {
+      width: "100%",
+      backgroundColor: "#F8F9FA",
+      borderRadius: 12,
+      paddingVertical: isTablet ? verticalScale(16) : verticalScale(12),
+      paddingHorizontal: scale(16),
+      borderWidth: 1,
+      borderColor: "#E9ECEF",
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    inputFieldError: {
+      borderColor: "#DC3545",
+      backgroundColor: "#FFF5F5",
+    },
+    inputText: {
+      color: "#1a1a1a",
+      fontSize: isTablet ? moderateScale(18) : isSmallScreen ? moderateScale(14) : moderateScale(16),
+      flex: 1,
+    },
+    errorText: {
+      color: "#DC3545",
+      fontSize: isTablet ? moderateScale(14) : isSmallScreen ? moderateScale(10) : moderateScale(12),
+      marginTop: verticalScale(4),
+      marginLeft: scale(4),
+    },
+    visibilityToggle: {
+      padding: scale(4),
+    },
+    visibilityText: {
+      color: "#355fc7",
+      fontSize: isTablet ? moderateScale(14) : isSmallScreen ? moderateScale(10) : moderateScale(12),
+      fontWeight: "600",
+    },
+    loginButton: {
+      backgroundColor: "#0AADFF",
+      paddingVertical: isTablet ? verticalScale(20) : verticalScale(16),
+      borderRadius: 12,
+      alignItems: "center",
+      width: "100%",
+      shadowColor: "#0AADFF",
+      shadowOffset: {
+        width: 0,
+        height: 4,
+      },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 4,
+      marginTop: verticalScale(10),
+    },
+    loginButtonDisabled: {
+      backgroundColor: "#87CEFA",
+      shadowOpacity: 0,
+      elevation: 0,
+    },
+    buttonContent: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: scale(8),
+    },
+    loginButtonText: {
+      color: "white",
+      fontSize: isTablet ? moderateScale(18) : isSmallScreen ? moderateScale(14) : moderateScale(16),
+      fontWeight: "bold",
+    },
+    supportContainer: {
+      marginTop: isTablet ? verticalScale(30) : verticalScale(20),
+      paddingTop: isTablet ? verticalScale(25) : verticalScale(20),
+      borderTopWidth: 1,
+      borderTopColor: "#E9ECEF",
+    },
+    supportText: {
+      color: "#666",
+      fontSize: isTablet ? moderateScale(14) : isSmallScreen ? moderateScale(10) : moderateScale(12),
+      textAlign: "center",
+      lineHeight: moderateScale(18),
+    },
+    supportLink: {
+      color: "#355fc7",
+      fontWeight: "600",
+    },
+  });
+};
