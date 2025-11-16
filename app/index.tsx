@@ -17,7 +17,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
-import { supabase } from "../../hooks/supabaseClient";
+import { supabase } from "../hooks/supabaseClient";
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -55,28 +55,6 @@ export default function HomeScreen() {
 
   const moderateScale = (size: number, factor = 0.5) => {
     return size + (scale(size) - size) * factor;
-  };
-
-  // Check if user is already logged in
-  useEffect(() => {
-    checkUserSession();
-  }, []);
-
-  const checkUserSession = async () => {
-    try {
-      const { data: { user }, error } = await supabase.auth.getUser();
-      
-      if (user && !error) {
-        const isDeliveryPerson = await checkDeliveryRole(user.id);
-        if (isDeliveryPerson) {
-          router.replace("/deliveries");
-        } else {
-          await supabase.auth.signOut();
-        }
-      }
-    } catch (error) {
-      console.log("Session check error:", error);
-    }
   };
 
   const checkDeliveryRole = async (userId: string): Promise<boolean> => {
@@ -215,7 +193,7 @@ export default function HomeScreen() {
               imageStyle={responsiveStyles.logoImageStyle}
             >
               <Image
-                source={require("../../assets/images/delivery.png")}
+                source={require("../assets/images/delivery.png")}
                 style={responsiveStyles.logo}
                 resizeMode="contain"
               />

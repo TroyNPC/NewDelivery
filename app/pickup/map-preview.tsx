@@ -16,224 +16,37 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { moderateScale, scale, verticalScale } from "react-native-size-matters";
 import { WebView } from "react-native-webview";
 
-export default function MapPreviewScreen() {
+export default function PickupMapPreviewScreen() {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
   const params = useLocalSearchParams();
   
   const { user, loading: authLoading } = useAuth();
 
-  // Extract parameters directly like the pickup example
-  const delivery = {
+  // Extract parameters
+  const pickup = {
     order_item_id: params.order_item_id as string,
     order_id: params.order_id as string,
     customer_name: params.customer_name as string,
     customer_contact: params.customer_contact as string,
-    delivery_location: params.delivery_location as string,
-    delivery_latitude: parseFloat(params.delivery_latitude as string) || 0,
-    delivery_longitude: parseFloat(params.delivery_longitude as string) || 0,
+    pickup_location: params.pickup_location as string,
+    pickup_latitude: parseFloat(params.pickup_latitude as string) || 0,
+    pickup_longitude: parseFloat(params.pickup_longitude as string) || 0,
     current_lat: parseFloat(params.current_lat as string) || 0,
     current_lng: parseFloat(params.current_lng as string) || 0,
-    weight: params.weight as string,
-    total_amount: params.total_amount as string,
     branch_name: params.branch_name as string,
     branch_address: params.branch_address as string,
     special_instructions: params.special_instructions as string || "",
-    order_method: params.order_method as string || "delivery",
   };
 
   const [mapHTML, setMapHTML] = useState<string | null>(null);
-  const [isTakingDelivery, setIsTakingDelivery] = useState(false);
+  const [isTakingPickup, setIsTakingPickup] = useState(false);
   const [mapLoading, setMapLoading] = useState(true);
   const [mapError, setMapError] = useState<string | null>(null);
   
   const isMounted = useRef(true);
   const webViewRef = useRef<WebView>(null);
 
-  // Generate stable map HTML - only once when component mounts
-  useEffect(() => {
-    isMounted.current = true;
-
-    const generateMapHTML = () => {
-      if (!isMounted.current) return;
-
-      try {
-        setMapLoading(true);
-        setMapError(null);
-
-        const isValidCoordinate = (lat: number, lng: number): boolean => 
-          !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
-
-        if (!isValidCoordinate(delivery.current_lat, delivery.current_lng) || 
-            !isValidCoordinate(delivery.delivery_latitude, delivery.delivery_longitude)) {
-          throw new Error('Invalid coordinates for map generation');
-        }
-
-        // Create a stable HTML string that won't change on re-renders
-        const html = `
-<!DOCTYPE html>
-<html>
-  <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
-    <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
-      html, body, #map { 
-        height: 100%; 
-        width: 100%;
-        overflow: hidden;
-      }
-      .leaflet-routing-container { 
-        display: none !important; 
-      }
-      .leaflet-control-container {
-        display: block !important;
-      }
-      .delivery-marker {
-        background: #28a745;
-        border: 3px solid white;
-        border-radius: 50%;
-        width: 16px;
-        height: 16px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-      }
-      .user-marker {
-        background: #007AFF;
-        border: 3px solid white;
-        border-radius: 50%;
-        width: 20px;
-        height: 20px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-      }
-    </style>
-  </head>
-  <body>
-    <div id="map"></div>
-    <script>
-      let map;
-      
-      function initializeMap() {
-        try {
-          // Initialize map
-          map = L.map('map', {
-            zoomControl: true,
-            dragging: true,
-            scrollWheelZoom: true,
-            doubleClickZoom: true,
-            boxZoom: true,
-            keyboard: true,
-            tap: true
-          }).setView([${delivery.current_lat}, ${delivery.current_lng}], 13);
-          
-          // Add tile layer
-          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '© OpenStreetMap'
-          }).addTo(map);
-
-          // User location marker
-          const userIcon = L.divIcon({
-            className: 'user-marker',
-            iconSize: [20, 20],
-            iconAnchor: [10, 10]
-          });
-          
-          L.marker([${delivery.current_lat}, ${delivery.current_lng}], { 
-            icon: userIcon
-          }).addTo(map).bindPopup("Your Location");
-
-          // Delivery location marker
-          const deliveryIcon = L.divIcon({
-            className: 'delivery-marker',
-            iconSize: [16, 16],
-            iconAnchor: [8, 8]
-          });
-          
-          L.marker([${delivery.delivery_latitude}, ${delivery.delivery_longitude}], { 
-            icon: deliveryIcon 
-          }).addTo(map).bindPopup("Delivery to ${delivery.customer_name.replace(/'/g, "\\'")}");
-
-          // Add routing control
-          if (typeof L.Routing !== 'undefined') {
-            L.Routing.control({
-              waypoints: [
-                L.latLng(${delivery.current_lat}, ${delivery.current_lng}),
-                L.latLng(${delivery.delivery_latitude}, ${delivery.delivery_longitude})
-              ],
-              lineOptions: {
-                styles: [{ color: '#28a745', weight: 6, opacity: 0.7 }]
-              },
-              addWaypoints: false,
-              draggableWaypoints: false,
-              fitSelectedRoutes: true,
-              show: false,
-              routeWhileDragging: false
-            }).addTo(map);
-          }
-
-          // Force resize to ensure proper rendering
-          setTimeout(() => {
-            map.invalidateSize();
-          }, 100);
-
-          console.log('Map initialized successfully');
-          
-        } catch (error) {
-          console.error('Map initialization error:', error);
-        }
-      }
-
-      // Initialize map when DOM is loaded
-      document.addEventListener('DOMContentLoaded', initializeMap);
-      
-      // Fallback initialization
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initializeMap);
-      } else {
-        initializeMap();
-      }
-    </script>
-  </body>
-</html>`;
-
-        if (isMounted.current) {
-          setMapHTML(html);
-        }
-      } catch (error: any) {
-        console.error('Map HTML generation error:', error);
-        if (isMounted.current) {
-          setMapError(error.message || 'Failed to generate map');
-        }
-      }
-    };
-
-    generateMapHTML();
-
-    return () => {
-      isMounted.current = false;
-    };
-  }, []); // Empty dependency array - generate once on mount
-
-  // Handle WebView load events
-  const handleWebViewLoad = () => {
-    if (isMounted.current) {
-      setMapLoading(false);
-    }
-  };
-
-  const handleWebViewError = (error: any) => {
-    console.error('WebView error:', error);
-    if (isMounted.current) {
-      setMapError('Failed to load map');
-      setMapLoading(false);
-    }
-  };
   // 🔥 ADD THIS FUNCTION AT THE TOP OF YOUR COMPONENT FILE
 const sendCustomerNotification = async (
   customerId: string,
@@ -345,14 +158,200 @@ const sendCustomerNotification = async (
     return { databaseSuccess: false, pushSuccess: false };
   }
 };
-  // Enhanced customer notification
-  // 🔥 ENHANCED: Customer notification with BOTH database + push notifications
+  // Generate stable map HTML - only once when component mounts
+  useEffect(() => {
+    isMounted.current = true;
+
+    const generateMapHTML = () => {
+      if (!isMounted.current) return;
+
+      try {
+        setMapLoading(true);
+        setMapError(null);
+
+        const isValidCoordinate = (lat: number, lng: number): boolean => 
+          !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
+
+        if (!isValidCoordinate(pickup.current_lat, pickup.current_lng) || 
+            !isValidCoordinate(pickup.pickup_latitude, pickup.pickup_longitude)) {
+          throw new Error('Invalid coordinates for map generation');
+        }
+
+        // Create a stable HTML string that won't change on re-renders
+        const html = `
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html, body, #map { 
+        height: 100%; 
+        width: 100%;
+        overflow: hidden;
+      }
+      .leaflet-routing-container { 
+        display: none !important; 
+      }
+      .leaflet-control-container {
+        display: block !important;
+      }
+      .pickup-marker {
+        background: #FF6B35;
+        border: 3px solid white;
+        border-radius: 50%;
+        width: 16px;
+        height: 16px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      }
+      .user-marker {
+        background: #007AFF;
+        border: 3px solid white;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script>
+      let map;
+      
+      function initializeMap() {
+        try {
+          // Initialize map
+          map = L.map('map', {
+            zoomControl: true,
+            dragging: true,
+            scrollWheelZoom: true,
+            doubleClickZoom: true,
+            boxZoom: true,
+            keyboard: true,
+            tap: true
+          }).setView([${pickup.current_lat}, ${pickup.current_lng}], 13);
+          
+          // Add tile layer
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap'
+          }).addTo(map);
+
+          // User location marker
+          const userIcon = L.divIcon({
+            className: 'user-marker',
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+          });
+          
+          L.marker([${pickup.current_lat}, ${pickup.current_lng}], { 
+            icon: userIcon
+          }).addTo(map).bindPopup("Your Location");
+
+          // Pickup location marker
+          const pickupIcon = L.divIcon({
+            className: 'pickup-marker',
+            iconSize: [16, 16],
+            iconAnchor: [8, 8]
+          });
+          
+          L.marker([${pickup.pickup_latitude}, ${pickup.pickup_longitude}], { 
+            icon: pickupIcon 
+          }).addTo(map).bindPopup("Pickup from ${pickup.customer_name.replace(/'/g, "\\'")}");
+
+          // Add routing control
+          if (typeof L.Routing !== 'undefined') {
+            L.Routing.control({
+              waypoints: [
+                L.latLng(${pickup.current_lat}, ${pickup.current_lng}),
+                L.latLng(${pickup.pickup_latitude}, ${pickup.pickup_longitude})
+              ],
+              lineOptions: {
+                styles: [{ color: '#FF6B35', weight: 6, opacity: 0.7 }]
+              },
+              addWaypoints: false,
+              draggableWaypoints: false,
+              fitSelectedRoutes: true,
+              show: false,
+              routeWhileDragging: false
+            }).addTo(map);
+          }
+
+          // Force resize to ensure proper rendering
+          setTimeout(() => {
+            map.invalidateSize();
+          }, 100);
+
+          console.log('Map initialized successfully');
+          
+        } catch (error) {
+          console.error('Map initialization error:', error);
+        }
+      }
+
+      // Initialize map when DOM is loaded
+      document.addEventListener('DOMContentLoaded', initializeMap);
+      
+      // Fallback initialization
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializeMap);
+      } else {
+        initializeMap();
+      }
+    </script>
+  </body>
+</html>`;
+
+        if (isMounted.current) {
+          setMapHTML(html);
+        }
+      } catch (error: any) {
+        console.error('Map HTML generation error:', error);
+        if (isMounted.current) {
+          setMapError(error.message || 'Failed to generate map');
+        }
+      }
+    };
+
+    generateMapHTML();
+
+    return () => {
+      isMounted.current = false;
+    };
+  }, []); // Empty dependency array - generate once on mount
+
+  // Handle WebView load events
+  const handleWebViewLoad = () => {
+    if (isMounted.current) {
+      setMapLoading(false);
+    }
+  };
+
+  const handleWebViewError = (error: any) => {
+    console.error('WebView error:', error);
+    if (isMounted.current) {
+      setMapError('Failed to load map');
+      setMapLoading(false);
+    }
+  };
+
+  // Only send customer notification
+  // Only send customer notification
+// 🔥 ENHANCED: Customer notification with BOTH database + push notifications
 // 🔥 FIXED: Customer notification with DRIVER NAME from users table
 const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
   try {
     if (!user) return;
 
-    console.log('📢 Sending notification for order:', orderId);
+    console.log('📢 Sending pickup notification for order:', orderId);
     
     // 1. Get driver's name from users table
     const { data: driverData, error: driverError } = await supabase
@@ -387,18 +386,9 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
       return;
     }
 
-    const isPickupReturn = delivery.order_method === "pickup";
-    
-    // 3. Create appropriate notification message WITH DRIVER NAME
-    let notificationTitle, notificationBody;
-    
-    if (isPickupReturn) {
-      notificationTitle = 'Driver Coming to Return Your Laundry! 🔄';
-      notificationBody = `Driver ${driverName} is coming to return your cleaned laundry`;
-    } else {
-      notificationTitle = 'Driver On The Way! 🚗';
-      notificationBody = `Driver ${driverName} is on the way to deliver your laundry`;
-    }
+    // 3. Create pickup-specific notification message WITH DRIVER NAME
+    const notificationTitle = 'Driver Coming for Pickup! 🚗';
+    const notificationBody = `Driver ${driverName} is on the way to pick up your laundry`;
 
     // 4. Use the optimized notification service
     const results = await sendCustomerNotification(order.customer_id, {
@@ -406,17 +396,18 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
       body: notificationBody,
       payload: {
         order_id: orderId,
-        order_status: 'out_for_delivery',
+        order_status: 'out_for_pickup',
         delivery_status: 'driver_assigned',
         driver_name: driverName, // ✅ Now using actual name
         driver_email: user.email, // ✅ Still include email for reference
-        order_method: delivery.order_method,
+        order_method: 'pickup',
         shop_name: order.shop_branches?.name,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        type: 'pickup_driver_assigned'
       }
     });
 
-    console.log('📊 Notification results:', {
+    console.log('📊 Pickup notification results:', {
       database: results.databaseSuccess ? '✅' : '❌',
       push: results.pushSuccess ? '✅' : '❌',
       driver_name: driverName
@@ -427,71 +418,61 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
   }
 };
 
-  // Enhanced delivery assignment
-  const takeDelivery = async (): Promise<void> => {
-    if (!user) {
-      Alert.alert(
-        "Authentication Required",
-        "Please log in to accept deliveries.",
-        [{ text: "Go to Login", onPress: () => router.push('/') }]
-      );
-      return;
-    }
-
-    if (!delivery.order_item_id || !delivery.order_id) {
-      Alert.alert(
-        "Invalid Data",
-        "Delivery information is incomplete. Please go back and try again."
-      );
-      return;
-    }
-
+  const takePickup = async () => {
     try {
-      setIsTakingDelivery(true);
+      setIsTakingPickup(true);
 
-      console.log('🔍 Starting delivery process:', {
-        order_id: delivery.order_id,
-        order_item_id: delivery.order_item_id,
-        customer_name: delivery.customer_name,
+      // Check if user exists and has an ID
+      if (!user?.id) {
+        Alert.alert("Authentication Error", "Please log in to accept pickups.");
+        return;
+      }
+
+      console.log('🔍 DEBUG - Starting pickup process:', {
+        order_id: pickup.order_id,
+        order_item_id: pickup.order_item_id,
+        customer_name: pickup.customer_name,
         driver_id: user.id
       });
 
-      // 1. Validate that the ORDER exists
+      // 1. FIRST: Validate that the ORDER exists
+      console.log('🔍 Checking if order exists...');
       const { data: order, error: orderError } = await supabase
         .from('orders')
         .select('id, customer_name, created_at')
-        .eq('id', delivery.order_id)
+        .eq('id', pickup.order_id)
         .single();
 
       if (orderError || !order) {
         console.error('❌ ORDER NOT FOUND:', { 
-          searched_order_id: delivery.order_id,
+          searched_order_id: pickup.order_id,
           error: orderError 
         });
         Alert.alert(
           "Order Not Found", 
-          `Order ID: ${delivery.order_id}\n\nThis order does not exist in the database. Please check the order details.`
+          `Order ID: ${pickup.order_id}\n\nThis order does not exist in the database. Please check the order details.`
         );
         return;
       }
 
       console.log('✅ ORDER FOUND:', order);
 
-      // 2. Validate ORDER_ITEM exists and is ready
+      // 2. Validate ORDER_ITEM exists and is waiting for pickup
+      console.log('🔍 Checking if order item exists...');
       const { data: orderItem, error: orderItemError } = await supabase
         .from('order_items')
         .select('id, status, order_id, quantity')
-        .eq('id', delivery.order_item_id)
+        .eq('id', pickup.order_item_id)
         .single();
 
       if (orderItemError || !orderItem) {
         console.error('❌ ORDER ITEM NOT FOUND:', {
-          searched_order_item_id: delivery.order_item_id,
+          searched_order_item_id: pickup.order_item_id,
           error: orderItemError
         });
         Alert.alert(
           "Order Item Not Found", 
-          `Order Item ID: ${delivery.order_item_id}\n\nNo order item found with that ID.`
+          `Order Item ID: ${pickup.order_item_id}\n\nNo order item found with that ID.`
         );
         return;
       }
@@ -499,48 +480,51 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
       console.log('✅ ORDER ITEM FOUND:', orderItem);
 
       // Verify order_item belongs to the correct order
-      if (orderItem.order_id !== delivery.order_id) {
+      if (orderItem.order_id !== pickup.order_id) {
         console.error('❌ ORDER ITEM MISMATCH:', {
-          expected_order_id: delivery.order_id,
+          expected_order_id: pickup.order_id,
           actual_order_id: orderItem.order_id
         });
         Alert.alert("Data Mismatch", "Order item does not belong to this order.");
         return;
       }
 
-      if (orderItem.status !== 'ready_for_delivery') {
-        console.log('❌ ORDER NOT READY:', { current_status: orderItem.status });
+      // Check if order is waiting for pickup
+      if (orderItem.status !== 'waiting_for_pickup') {
+        console.log('❌ ORDER NOT WAITING FOR PICKUP:', { current_status: orderItem.status });
         Alert.alert(
-          "Cannot Take Delivery", 
-          `Current status: ${orderItem.status}\n\nOrder must be 'ready_for_delivery' to proceed.`
+          "Cannot Take Pickup", 
+          `Current status: ${orderItem.status}\n\nOrder must be 'waiting_for_pickup' to proceed.`
         );
         return;
       }
 
-      console.log('✅ ORDER ITEM IS READY FOR DELIVERY');
+      console.log('✅ ORDER ITEM IS WAITING FOR PICKUP');
 
-      // 3. Check if driver already has an active delivery
-      const { data: existingActiveDelivery, error: activeCheckError } = await supabase
+      // 3. Check if driver already has an active delivery/pickup
+      console.log('🔍 Checking for existing active deliveries/pickups...');
+      const { data: existingActiveDeliveries, error: activeCheckError } = await supabase
         .from("deliveries")
-        .select("id, order_id, status")
+        .select("id, order_id, status, driver_id")
         .eq("driver_id", user.id)
-        .in("status", ["assigned", "in_progress", "picked_up"])
-        .maybeSingle();
+        .in("status", ["in_progress", "picked_up"]) // REMOVED "assigned" - only check in_progress and picked_up
+        .limit(1);
 
       if (activeCheckError) {
         console.error('Error checking active deliveries:', activeCheckError);
         throw activeCheckError;
       }
 
-      if (existingActiveDelivery) {
-        console.log('❌ DRIVER HAS ACTIVE DELIVERY:', existingActiveDelivery);
+      if (existingActiveDeliveries && existingActiveDeliveries.length > 0) {
+        const existingActiveDelivery = existingActiveDeliveries[0];
+        console.log('❌ DRIVER HAS ACTIVE DELIVERY/PICKUP:', existingActiveDelivery);
         Alert.alert(
-          "Already Have Active Delivery",
-          "You already have an active delivery. Please complete it before taking a new one.",
+          "Already Have Active Delivery/Pickup",
+          "You already have an active delivery or pickup. Please complete it before taking a new one.",
           [
             {
-              text: "Continue Current Delivery",
-              onPress: () => router.push(`/delivery/${existingActiveDelivery.id}`)
+              text: "Continue Current Task",
+              onPress: () => router.push(`/pickup/${existingActiveDelivery.id}`)
             },
             {
               text: "OK",
@@ -551,137 +535,137 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
         return;
       }
 
-      console.log('✅ No active deliveries found');
+      console.log('✅ No active deliveries/pickups found');
 
-      // 4. Check if delivery already exists for this order
-      const { data: existingDelivery, error: checkError } = await supabase
+      // 4. Check if delivery/pickup already exists for this order
+      console.log('🔍 Checking for existing delivery/pickup...');
+      const { data: existingDeliveries, error: checkError } = await supabase
         .from("deliveries")
         .select("id, driver_id, status")
-        .eq("order_id", delivery.order_id)
-        .maybeSingle();
+        .eq("order_id", pickup.order_id)
+        .limit(1);
 
       if (checkError) {
-        console.error('Error checking existing delivery:', checkError);
+        console.error('Error checking existing deliveries:', checkError);
         throw checkError;
       }
 
-      if (existingDelivery) {
-        console.log('❌ DELIVERY ALREADY EXISTS:', existingDelivery);
+      if (existingDeliveries && existingDeliveries.length > 0) {
+        const existingDelivery = existingDeliveries[0];
+        console.log('❌ DELIVERY/PICKUP ALREADY EXISTS:', existingDelivery);
         if (existingDelivery.driver_id === user.id) {
-          Alert.alert("Already Taken", "You have already taken this delivery.");
+          Alert.alert("Already Taken", "You have already taken this pickup.");
         } else {
-          Alert.alert("Already Taken", "This delivery has already been taken by another driver.");
+          Alert.alert("Already Taken", "This pickup has already been taken by another driver.");
         }
         return;
       }
 
-      console.log('✅ No existing delivery found');
+      console.log('✅ No existing delivery/pickup found');
 
-      // 5. Insert the delivery record
-      console.log('🚀 Creating delivery record...');
+      // 5. Insert the delivery record for PICKUP - START WITH in_progress
+      console.log('🚀 Creating pickup delivery record...');
       const { data: newDelivery, error: deliveryError } = await supabase
         .from("deliveries")
         .insert({
-          order_id: delivery.order_id,
+          order_id: pickup.order_id,
           driver_id: user.id,
-          status: delivery.order_method === "pickup" ? "in_progress" : "out_for_delivery",
+          status: "in_progress", // CHANGED FROM "assigned" TO "in_progress"
           assigned_at: new Date().toISOString(),
-          ...(delivery.order_method === "pickup" && { picked_up_at: new Date().toISOString() }),
+          // Store pickup info in attempt_reason field since meta doesn't exist
+          attempt_reason: `PICKUP: ${pickup.customer_name} - ${pickup.pickup_location}`
         })
         .select()
         .single();
 
       if (deliveryError) {
-        console.error('❌ DELIVERY CREATION FAILED:', deliveryError);
+        console.error('❌ PICKUP DELIVERY CREATION FAILED:', deliveryError);
         if (deliveryError.code === "42501") {
           Alert.alert(
             "Permission Denied", 
-            "You don't have permission to take deliveries. Please contact support."
+            "You don't have permission to take pickups. Please contact support."
           );
         } else if (deliveryError.code === "23505") {
-          Alert.alert("Already Taken", "This delivery was just taken by another driver.");
+          Alert.alert("Already Taken", "This pickup was just taken by another driver.");
         } else {
           Alert.alert("Database Error", deliveryError.message);
         }
         return;
       }
 
-      console.log('✅ DELIVERY CREATED SUCCESSFULLY:', newDelivery.id);
+      console.log('✅ PICKUP DELIVERY CREATED SUCCESSFULLY:', newDelivery.id);
 
-      // 6. Update order item status
-      console.log('🔄 Updating order item status...');
+      // 6. Update order_item status to 'collected'
+      console.log('⏳ Updating order item status...');
       const { error: updateError } = await supabase
         .from('order_items')
-        .update({ status: 'out_for_delivery' })
-        .eq('id', delivery.order_item_id);
+        .update({
+          status: 'collected',
+        })
+        .eq('id', pickup.order_item_id);
 
       if (updateError) {
-        console.error('❌ ORDER ITEM UPDATE FAILED:', updateError);
-        // Rollback delivery creation
-        await supabase.from('deliveries').delete().eq('id', newDelivery.id);
-        Alert.alert("Update Error", "Failed to update order status. Please try again.");
-        return;
+        console.error('❌ ORDER ITEM STATUS UPDATE FAILED:', updateError);
+        // Don't return here - the pickup was created successfully
+      } else {
+        console.log('✅ ORDER ITEM STATUS UPDATED TO: collected');
       }
-
-      console.log('✅ ORDER ITEM STATUS UPDATED TO: out_for_delivery');
 
       // 7. Send notification to customer
       console.log('📢 Sending customer notification...');
-      await notifyCustomerDriverAssigned(delivery.order_id);
+      await notifyCustomerDriverAssigned(pickup.order_id);
 
-      console.log('🎉 DELIVERY PROCESS COMPLETED SUCCESSFULLY!');
+      console.log('🎉 PICKUP PROCESS COMPLETED SUCCESSFULLY!');
 
-      // 8. Navigate to delivery tracking
-      router.replace({
-        pathname: "/delivery/[id]",
+      // 8. Navigate to pickup tracking
+      router.push({
+        pathname: "/pickup/[id]",
         params: {
           id: newDelivery.id,
-          orderId: delivery.order_id,
-          customerName: delivery.customer_name,
-          customerContact: delivery.customer_contact,
-          deliveryLocation: delivery.delivery_location,
-          deliveryLat: delivery.delivery_latitude.toString(),
-          deliveryLng: delivery.delivery_longitude.toString(),
-          specialInstructions: delivery.special_instructions || "",
-          orderMethod: delivery.order_method || "delivery",
+          orderId: pickup.order_id,
+          customerName: pickup.customer_name,
+          customerContact: pickup.customer_contact,
+          pickupLocation: pickup.pickup_location,
+          pickupLat: pickup.pickup_latitude.toString(),
+          pickupLng: pickup.pickup_longitude.toString(),
+          specialInstructions: pickup.special_instructions,
+          deliveryType: 'pickup', // Important: distinguish between pickup and delivery
+          orderItemId: pickup.order_item_id
         }
       });
 
     } catch (error: any) {
-      console.error("💥 UNEXPECTED ERROR TAKING DELIVERY:", error);
+      console.error("💥 UNEXPECTED ERROR TAKING PICKUP:", error);
       Alert.alert(
         "Unexpected Error", 
-        error.message || "An unexpected error occurred while taking the delivery."
+        error.message || "An unexpected error occurred while taking the pickup."
       );
     } finally {
-      setIsTakingDelivery(false);
+      setIsTakingPickup(false);
     }
   };
 
-  const handleTakeDelivery = (): void => {
+  const handleTakePickup = () => {
     if (!user) {
       Alert.alert(
         "Authentication Required",
-        "Please log in to accept deliveries.",
+        "Please log in to accept pickups.",
         [{ text: "Go to Login", onPress: () => router.push('../index') }]
       );
       return;
     }
 
-    const isPickupReturn = delivery.order_method === "pickup";
-    const actionType = isPickupReturn ? "Return Delivery" : "Delivery";
-
     Alert.alert(
-      `Start ${actionType}?`,
-      `Are you sure you want to start ${actionType.toLowerCase()} to ${delivery.customer_name}?\n\nOrder ID: ${delivery.order_id}\nLocation: ${delivery.delivery_location}`,
+      "Start Pickup?",
+      `Are you sure you want to start pickup from ${pickup.customer_name}?\n\nOrder ID: ${pickup.order_id}`,
       [
         {
           text: "Cancel",
           style: "cancel"
         },
         {
-          text: `Start ${actionType}`,
-          onPress: takeDelivery
+          text: "Start Pickup",
+          onPress: takePickup
         }
       ]
     );
@@ -698,7 +682,7 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
   if (authLoading) {
     return (
       <SafeAreaView style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color="#28a745" />
+        <ActivityIndicator size="large" color="#FF6B35" />
         <Text style={styles.loadingText}>Checking authentication...</Text>
       </SafeAreaView>
     );
@@ -709,7 +693,7 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
       <SafeAreaView style={[styles.container, styles.centered]}>
         <Ionicons name="lock-closed" size={48} color="#ccc" />
         <Text style={styles.errorTitle}>Authentication Required</Text>
-        <Text style={styles.errorText}>Please log in to access delivery assignments</Text>
+        <Text style={styles.errorText}>Please log in to access pickup assignments</Text>
         <TouchableOpacity 
           style={styles.authButton}
           onPress={() => router.push('/')}
@@ -720,9 +704,6 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
     );
   }
 
-  const isPickupReturn = delivery.order_method === "pickup";
-  const actionType = isPickupReturn ? "Return Delivery" : "Delivery";
-
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -730,7 +711,7 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{actionType} Route</Text>
+        <Text style={styles.headerTitle}>Pickup Route</Text>
         <View style={{ width: 24 }} />
       </View>
 
@@ -738,7 +719,7 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
       <View style={styles.mapContainer}>
         {mapLoading && (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#28a745" />
+            <ActivityIndicator size="large" color="#FF6B35" />
             <Text style={styles.loadingText}>Loading map...</Text>
           </View>
         )}
@@ -788,83 +769,57 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
           />
         ) : (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#28a745" />
+            <ActivityIndicator size="large" color="#FF6B35" />
             <Text style={styles.loadingText}>Preparing map...</Text>
           </View>
         )}
       </View>
 
-      {/* Delivery Info */}
+      {/* Pickup Info */}
       <View style={styles.infoContainer}>
-        <View style={[
-          styles.typeBadge,
-          isPickupReturn ? styles.pickupBadge : styles.deliveryBadge
-        ]}>
-          <Ionicons 
-            name={isPickupReturn ? "refresh-circle" : "car-sport"} 
-            size={16} 
-            color="white" 
-          />
-          <Text style={styles.typeBadgeText}>
-            {isPickupReturn ? "🔄 PICKUP RETURN" : "📦 DELIVERY"}
-          </Text>
-        </View>
-
-        <Text style={styles.customerName}>
-          {isPickupReturn ? "Return to:" : "Delivery to:"} {delivery.customer_name}
-        </Text>
-        <Text style={styles.deliveryAddress}>{delivery.delivery_location}</Text>
+        <Text style={styles.customerName}>Pickup from: {pickup.customer_name}</Text>
+        <Text style={styles.pickupAddress}>{pickup.pickup_location}</Text>
         
-        {delivery.special_instructions && (
+        {/* Debug Information */}
+        <View style={styles.debugContainer}>
+          <Text style={styles.debugText}>Order ID: {pickup.order_id}</Text>
+          <Text style={styles.debugText}>Order Item ID: {pickup.order_item_id}</Text>
+          <Text style={styles.debugText}>Status: waiting_for_pickup</Text>
+        </View>
+        
+        {pickup.special_instructions && (
           <View style={styles.specialInstructionsContainer}>
             <View style={styles.instructionsHeader}>
-              <Ionicons name="information-circle" size={16} color="#28a745" />
+              <Ionicons name="information-circle" size={16} color="#FF6B35" />
               <Text style={styles.instructionsTitle}>Special Instructions</Text>
             </View>
-            <Text style={styles.instructionsText}>{delivery.special_instructions}</Text>
+            <Text style={styles.instructionsText}>{pickup.special_instructions}</Text>
           </View>
         )}
-        
-        <View style={styles.detailsContainer}>
-          <View style={styles.detailRow}>
-            <Ionicons name="call-outline" size={16} color="#666" />
-            <Text style={styles.detailText}>Contact: {delivery.customer_contact}</Text>
-          </View>
-          <View style={styles.detailRow}>
-            <Ionicons name="scale-outline" size={16} color="#666" />
-            <Text style={styles.detailText}>Weight: {delivery.weight}</Text>
-          </View>
-          <View style={styles.detailRow}>
-            <Ionicons name="cash-outline" size={16} color="#666" />
-            <Text style={styles.detailText}>Amount: ₱{delivery.total_amount}</Text>
-          </View>
-        </View>
         
         <View style={styles.buttonContainer}>
           <TouchableOpacity 
             style={styles.backButtonStyle}
             onPress={() => router.back()}
-            disabled={isTakingDelivery}
+            disabled={isTakingPickup}
           >
             <Text style={styles.backButtonText}>Back to List</Text>
           </TouchableOpacity>
           
           <TouchableOpacity 
             style={[
-              styles.takeDeliveryButton,
-              isTakingDelivery && styles.buttonDisabled
+              styles.takePickupButton,
+              isTakingPickup && styles.buttonDisabled
             ]}
-            onPress={handleTakeDelivery}
-            disabled={isTakingDelivery}
+            onPress={handleTakePickup}
+            disabled={isTakingPickup}
           >
-            {isTakingDelivery ? (
+            {isTakingPickup ? (
               <ActivityIndicator size="small" color="white" />
             ) : (
               <>
-                <Ionicons name="checkmark-circle" size={20} color="white" />
-                <Text style={styles.takeDeliveryText}>
-                  Take This {actionType}
-                </Text>
+                <Ionicons name="bag-handle" size={20} color="white" />
+                <Text style={styles.takePickupText}>Take This Pickup</Text>
               </>
             )}
           </TouchableOpacity>
@@ -943,7 +898,7 @@ const styles = StyleSheet.create({
   },
   retryButton: {
     marginTop: verticalScale(16),
-    backgroundColor: '#28a745',
+    backgroundColor: '#FF6B35',
     paddingHorizontal: scale(20),
     paddingVertical: verticalScale(10),
     borderRadius: scale(8),
@@ -959,45 +914,37 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
   },
-  typeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: scale(10),
-    paddingVertical: verticalScale(6),
-    borderRadius: scale(16),
-    marginBottom: verticalScale(12),
-    gap: scale(4),
-  },
-  deliveryBadge: {
-    backgroundColor: '#28a745',
-  },
-  pickupBadge: {
-    backgroundColor: '#FF6B35',
-  },
-  typeBadgeText: {
-    color: 'white',
-    fontSize: moderateScale(10),
-    fontWeight: 'bold',
-  },
   customerName: {
     fontSize: moderateScale(16),
     fontWeight: 'bold',
     color: '#333',
     marginBottom: verticalScale(4),
   },
-  deliveryAddress: {
+  pickupAddress: {
     fontSize: moderateScale(14),
     color: '#666',
     marginBottom: verticalScale(12),
   },
+  debugContainer: {
+    backgroundColor: '#e3f2fd',
+    padding: scale(10),
+    borderRadius: scale(8),
+    marginBottom: verticalScale(12),
+    borderLeftWidth: 4,
+    borderLeftColor: '#2196f3',
+  },
+  debugText: {
+    fontSize: moderateScale(10),
+    color: '#1565c0',
+    fontFamily: 'monospace',
+  },
   specialInstructionsContainer: {
-    backgroundColor: '#e8f5e8',
+    backgroundColor: '#fff3e0',
     padding: scale(12),
     borderRadius: scale(8),
     marginBottom: verticalScale(12),
     borderLeftWidth: 4,
-    borderLeftColor: '#28a745',
+    borderLeftColor: '#FF6B35',
   },
   instructionsHeader: {
     flexDirection: 'row',
@@ -1007,29 +954,13 @@ const styles = StyleSheet.create({
   instructionsTitle: {
     fontSize: moderateScale(12),
     fontWeight: 'bold',
-    color: '#28a745',
+    color: '#FF6B35',
     marginLeft: scale(6),
   },
   instructionsText: {
     fontSize: moderateScale(12),
     color: '#666',
     lineHeight: moderateScale(16),
-  },
-  detailsContainer: {
-    backgroundColor: 'white',
-    padding: scale(12),
-    borderRadius: scale(8),
-    marginBottom: verticalScale(16),
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: verticalScale(6),
-  },
-  detailText: {
-    fontSize: moderateScale(12),
-    color: '#666',
-    marginLeft: scale(6),
   },
   buttonContainer: {
     flexDirection: 'row',
@@ -1049,17 +980,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: moderateScale(14),
   },
-  takeDeliveryButton: {
+  takePickupButton: {
     flex: 2,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: verticalScale(12),
-    backgroundColor: '#28a745',
+    backgroundColor: '#FF6B35',
     borderRadius: scale(8),
     gap: scale(8),
   },
-  takeDeliveryText: {
+  takePickupText: {
     color: 'white',
     fontWeight: '600',
     fontSize: moderateScale(14),
@@ -1068,7 +999,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   authButton: {
-    backgroundColor: '#28a745',
+    backgroundColor: '#FF6B35',
     paddingHorizontal: scale(20),
     paddingVertical: verticalScale(12),
     borderRadius: scale(8),

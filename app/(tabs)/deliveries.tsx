@@ -6,19 +6,18 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,
+  useWindowDimensions
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { moderateScale, scale, verticalScale } from "react-native-size-matters";
-import Svg, { Path } from "react-native-svg";
 import { WebView } from "react-native-webview";
+import { AppHeader } from "../component/AppHeader";
 
 type Delivery = {
   order_item_id: string;
@@ -39,29 +38,96 @@ type Delivery = {
   delivery_status: string | null;
   started_at: string;
   delivery_id?: string;
+  order_method?: string;
+  order_method_label?: string;
 };
 
 const webViewCache = new Map<string, string>();
 
-// Create a separate component for the mini map to use hooks properly
+// Error Boundary Component
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error?: Error }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("Error Boundary Caught:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={styles.errorContainer}>
+          <Ionicons name="warning-outline" size={48} color="#ff6b35" />
+          <Text style={styles.errorTitle}>Something went wrong</Text>
+          <Text style={styles.errorText}>
+            {this.state.error?.message || "An unexpected error occurred"}
+          </Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => this.setState({ hasError: false })}
+          >
+            <Text style={styles.retryButtonText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 const MiniMap = ({ 
   destination, 
   orderItemId, 
-  currentLocation,
-  visibleItems 
+  currentLocation
 }: { 
   destination: { lat: number; lng: number };
   orderItemId: string;
   currentLocation: { lat: number; lng: number } | null;
-  visibleItems: Set<string>;
 }) => {
   const [webViewError, setWebViewError] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const isMounted = useRef(true);
 
   const getCachedMapHTML = useCallback(
     (dest: { lat: number; lng: number }) => {
-      if (!currentLocation) return "";
+      if (!currentLocation) {
+        return `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <style>
+                html, body, #map { 
+                  height: 100%; 
+                  margin: 0; 
+                  padding: 0; 
+                  background-color: #f0f0f0;
+                  display: flex;
+                  justify-content: center;
+                  align-items: center;
+                  font-family: Arial, sans-serif;
+                }
+              </style>
+            </head>
+            <body>
+              <div id="map">Waiting for location...</div>
+            </body>
+          </html>
+        `;
+      }
 
       const cacheKey = `${currentLocation.lat},${currentLocation.lng}-${dest.lat},${dest.lng}`;
+      
       if (webViewCache.has(cacheKey)) return webViewCache.get(cacheKey)!;
 
       const mapHTML = `
@@ -73,27 +139,71 @@ const MiniMap = ({
             <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
             <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
             <style>
-              html, body, #map { height: 100%; margin: 0; padding: 0; }
+              html, body, #map { 
+                height: 100%; 
+                margin: 0; 
+                padding: 0; 
+                background-color: #f0f0f0;
+              }
               .leaflet-routing-container { display: none; }
+              .leaflet-control-container { display: none; }
             </style>
           </head>
           <body>
             <div id="map"></div>
             <script>
-              var map = L.map('map').setView([${currentLocation.lat}, ${currentLocation.lng}], 14);
-              L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19
-              }).addTo(map);
-              L.Routing.control({
-                waypoints: [
-                  L.latLng(${currentLocation.lat}, ${currentLocation.lng}),
-                  L.latLng(${dest.lat}, ${dest.lng})
-                ],
-                addWaypoints: false,
-                draggableWaypoints: false,
-                show: false,
-                lineOptions: { styles: [{ color: '#3864C3', weight: 5 }] }
-              }).addTo(map);
+              try {
+                var map = L.map('map', {
+                  zoomControl: false,
+                  attributionControl: false
+                }).setView([${currentLocation.lat}, ${currentLocation.lng}], 14);
+                
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                  maxZoom: 19
+                }).addTo(map);
+                
+                // Add markers
+                var startMarker = L.marker([${currentLocation.lat}, ${currentLocation.lng}])
+                  .addTo(map)
+                  .bindPopup('Your Location');
+                  
+                var endMarker = L.marker([${dest.lat}, ${dest.lng}])
+                  .addTo(map)
+                  .bindPopup('Delivery Location');
+                
+                // Add route
+                var control = L.Routing.control({
+                  waypoints: [
+                    L.latLng(${currentLocation.lat}, ${currentLocation.lng}),
+                    L.latLng(${dest.lat}, ${dest.lng})
+                  ],
+                  addWaypoints: false,
+                  draggableWaypoints: false,
+                  routeWhileDragging: false,
+                  show: false,
+                  fitSelectedRoutes: true,
+                  lineOptions: { 
+                    styles: [{ color: '#3864C3', weight: 5, opacity: 0.7 }] 
+                  },
+                  createMarker: function() { return null; }
+                }).addTo(map);
+                
+                // Fit bounds to show both markers
+                var group = new L.featureGroup([startMarker, endMarker]);
+                map.fitBounds(group.getBounds().pad(0.1));
+                
+                // Notify React that map is loaded
+                setTimeout(function() {
+                  if (window.ReactNativeWebView) {
+                    window.ReactNativeWebView.postMessage('map_loaded');
+                  }
+                }, 500);
+                
+              } catch (error) {
+                if (window.ReactNativeWebView) {
+                  window.ReactNativeWebView.postMessage('map_error:' + error.message);
+                }
+              }
             </script>
           </body>
         </html>
@@ -104,20 +214,26 @@ const MiniMap = ({
     [currentLocation]
   );
 
-  if (webViewError || !currentLocation) {
+  useEffect(() => {
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  if (webViewError) {
     return (
       <View style={styles.mapPlaceholder}>
         <Ionicons name="map-outline" size={20} color="#888" />
-        <Text style={styles.mapPlaceholderText}>Map view</Text>
+        <Text style={styles.mapPlaceholderText}>Map unavailable</Text>
       </View>
     );
   }
 
-  if (!visibleItems.has(orderItemId)) {
+  if (!currentLocation) {
     return (
       <View style={styles.mapPlaceholder}>
         <ActivityIndicator size="small" color="#3864C3" />
-        <Text style={styles.mapPlaceholderText}>Loading...</Text>
+        <Text style={styles.mapPlaceholderText}>Getting location...</Text>
       </View>
     );
   }
@@ -127,21 +243,45 @@ const MiniMap = ({
       <WebView
         originWhitelist={["*"]}
         source={{ html: getCachedMapHTML(destination) }}
-        javaScriptEnabled
-        domStorageEnabled
-        startInLoadingState
+        javaScriptEnabled={true}
+        domStorageEnabled={true}
+        startInLoadingState={true}
         scrollEnabled={false}
+        zoomable={false}
         overScrollMode="never"
-        androidLayerType="software"
-        style={{ flex: 1, backgroundColor: "#f0f0f0" }}
+        androidLayerType="hardware"
+        style={{ flex: 1 }}
+        onLoadStart={() => setIsLoading(true)}
+        onLoadEnd={() => setIsLoading(false)}
+        onMessage={(event) => {
+          if (event.nativeEvent.data === 'map_loaded') {
+            setIsLoading(false);
+          } else if (event.nativeEvent.data.startsWith('map_error')) {
+            console.error('Map error:', event.nativeEvent.data);
+            if (isMounted.current) setWebViewError(true);
+          }
+        }}
+        onError={() => {
+          console.log('WebView error');
+          if (isMounted.current) setWebViewError(true);
+        }}
+        onHttpError={() => {
+          console.log('WebView HTTP error');
+          if (isMounted.current) setWebViewError(true);
+        }}
         renderLoading={() => (
-          <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#f0f0f0" }}>
+          <View style={styles.mapLoadingContainer}>
             <ActivityIndicator size="small" color="#3864C3" />
+            <Text style={styles.mapLoadingText}>Loading map...</Text>
           </View>
         )}
-        onError={() => setWebViewError(true)}
-        onHttpError={() => setWebViewError(true)}
       />
+      {isLoading && (
+        <View style={styles.mapLoadingOverlay}>
+          <ActivityIndicator size="small" color="#3864C3" />
+          <Text style={styles.mapLoadingText}>Loading...</Text>
+        </View>
+      )}
     </View>
   );
 };
@@ -150,36 +290,59 @@ export default function LaundryInfo() {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
   const scrollViewRef = useRef<ScrollView>(null);
-  const [visibleItems, setVisibleItems] = useState<Set<string>>(new Set());
+  
+  const isMounted = useRef(true);
+  
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [activeDelivery, setActiveDelivery] = useState<Delivery | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [currentDriverId] = useState<string>("e303e1db-c147-4ac0-afcd-0d48304f281e");
   const [takingDeliveryId, setTakingDeliveryId] = useState<string | null>(null);
   const [driverBranchId, setDriverBranchId] = useState<string | null>(null);
+  
+  const [currentDriverId, setCurrentDriverId] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  // Confirmation Modal State
-  const [confirmationModal, setConfirmationModal] = useState<{
-    visible: boolean;
-    orderItemId: string;
-    orderId: string;
-    customerName: string;
-  }>({
-    visible: false,
-    orderItemId: "",
-    orderId: "",
-    customerName: "",
-  });
+  // Get current authenticated user
+  const getCurrentUser = useCallback(async () => {
+    try {
+      if (isMounted.current) {
+        setAuthLoading(true);
+      }
+      
+      const { data: { user }, error } = await supabase.auth.getUser();
+      
+      if (error) throw error;
+      if (!user) {
+        if (isMounted.current) {
+          setAuthError("No user logged in");
+        }
+        return null;
+      }
+      
+      return user;
+    } catch (error: any) {
+      console.error("Error getting current user:", error);
+      if (isMounted.current) {
+        setAuthError(error.message || "Authentication failed");
+      }
+      return null;
+    } finally {
+      if (isMounted.current) {
+        setAuthLoading(false);
+      }
+    }
+  }, []);
 
   // Get driver's assigned branch
-  const getDriverBranch = useCallback(async () => {
+  const getDriverBranch = useCallback(async (driverId: string) => {
     try {
       const { data, error } = await supabase
         .from("shop_user_assignments")
         .select("branch_id")
-        .eq("user_id", currentDriverId)
+        .eq("user_id", driverId)
         .eq("role_in_shop", "delivery")
         .eq("is_active", true)
         .single();
@@ -190,10 +353,10 @@ export default function LaundryInfo() {
       console.error("Error fetching driver branch:", error);
       return null;
     }
-  }, [currentDriverId]);
+  }, []);
 
   // Fetch active delivery for this driver
-  const fetchActiveDelivery = useCallback(async () => {
+  const fetchActiveDelivery = useCallback(async (driverId: string) => {
     try {
       const { data, error } = await supabase
         .from("deliveries")
@@ -208,6 +371,11 @@ export default function LaundryInfo() {
             delivery_location,
             delivery_latitude,
             delivery_longitude,
+            method_id,
+            shop_methods (
+              code,
+              label
+            ),
             order_items (
               id,
               quantity,
@@ -216,7 +384,7 @@ export default function LaundryInfo() {
             )
           )
         `)
-        .eq("driver_id", currentDriverId)
+        .eq("driver_id", driverId)
         .in("status", ["assigned", "in_progress", "picked_up"])
         .order("assigned_at", { ascending: false })
         .limit(1)
@@ -224,15 +392,26 @@ export default function LaundryInfo() {
 
       if (error) {
         if (error.code === "PGRST116") {
-          // No active delivery found
-          setActiveDelivery(null);
+          if (isMounted.current) {
+            setActiveDelivery(null);
+          }
           return;
         }
         throw error;
       }
 
-      if (data) {
-        const orderItem = data.orders?.order_items?.[0];
+      if (data && isMounted.current) {
+        const orderItem = Array.isArray(data.orders?.order_items) ? data.orders.order_items[0] : null;
+        
+        let method = null;
+        if (data.orders?.shop_methods) {
+          if (Array.isArray(data.orders.shop_methods) && data.orders.shop_methods.length > 0) {
+            method = data.orders.shop_methods[0];
+          } else if (typeof data.orders.shop_methods === 'object') {
+            method = data.orders.shop_methods;
+          }
+        }
+        
         const quantity = orderItem?.quantity ? Number(orderItem.quantity) : 0;
         const pricePerUnit = orderItem?.price_per_unit ? Number(orderItem.price_per_unit) : 0;
         
@@ -252,37 +431,60 @@ export default function LaundryInfo() {
           branch_address: "",
           branch_lat: 0,
           branch_lng: 0,
-          driver_id: currentDriverId,
+          driver_id: driverId,
           delivery_status: data.status,
           started_at: orderItem?.started_at || new Date().toISOString(),
+          order_method: method?.code || "delivery",
+          order_method_label: method?.label || "Delivery",
         };
         setActiveDelivery(active);
-      } else {
+      } else if (isMounted.current) {
         setActiveDelivery(null);
       }
     } catch (error) {
       console.error("Error fetching active delivery:", error);
-      setActiveDelivery(null);
+      if (isMounted.current) {
+        setActiveDelivery(null);
+      }
     }
-  }, [currentDriverId]);
+  }, []);
 
-  // Memoize fetchDeliveries to prevent infinite re-renders
-  const fetchDeliveries = useCallback(async () => {
+  // Fixed fetchDeliveries function with correct table names
+  const fetchDeliveries = useCallback(async (driverId: string) => {
     try {
-      setLoading(true);
+      if (isMounted.current) {
+        setLoading(true);
+      }
 
-      // First, get the driver's branch
-      const branchId = await getDriverBranch();
+      const branchId = await getDriverBranch(driverId);
       if (!branchId) {
-        Alert.alert("Error", "No branch assigned to this driver");
-        setDeliveries([]);
+        if (isMounted.current) {
+          Alert.alert("Error", "No branch assigned to this driver");
+          setDeliveries([]);
+        }
         return;
       }
 
-      setDriverBranchId(branchId);
+      if (isMounted.current) {
+        setDriverBranchId(branchId);
+      }
 
-      // Query order_items directly and join with orders
-      const { data, error } = await supabase
+      const { data: branchData, error: branchError } = await supabase
+        .from("shop_branches")
+        .select("name, address, latitude, longitude")
+        .eq("id", branchId)
+        .single();
+
+      if (branchError) {
+        console.error("Error fetching branch details:", branchError);
+      }
+
+      const branchName = branchData?.name || "Main Branch Hangyu Laundry Shop";
+      const branchAddress = branchData?.address || "Santa Rosa Street";
+      const branchLat = branchData?.latitude || 0;
+      const branchLng = branchData?.longitude || 0;
+
+      const { data: orderItems, error: itemsError } = await supabase
         .from("order_items")
         .select(`
           id,
@@ -299,166 +501,256 @@ export default function LaundryInfo() {
             delivery_latitude,
             delivery_longitude,
             branch_id,
-            shop_branches!inner (
-              name,
-              address,
-              latitude,
-              longitude
-            ),
-            deliveries!left (
-              driver_id,
-              status
+            method_id,
+            shop_methods (
+              code,
+              label
             )
           )
         `)
         .eq("status", "ready_for_delivery")
         .eq("orders.branch_id", branchId)
-        .is("orders.deliveries.driver_id", null)
         .order("started_at", { ascending: true });
 
-      if (error) throw error;
+      if (itemsError) throw itemsError;
 
-      const transformedDeliveries: Delivery[] = (data || []).map((item: any) => {
-      const quantity = item.quantity ? Number(item.quantity) : 0;
-      const pricePerUnit = item.price_per_unit ? Number(item.price_per_unit) : 0;
-        
-        return {
-          order_item_id: item.id || "",
-          order_item_status: item.status || "ready_for_delivery",
-          order_id: item.order_id || "",
-          customer_name: item.orders?.customer_name || "Unknown Customer",
-          customer_contact: item.orders?.customer_contact || "No contact",
-          delivery_location: item.orders?.delivery_location || "Address not provided",
-          delivery_latitude: item.orders?.delivery_latitude || 0,
-          delivery_longitude: item.orders?.delivery_longitude || 0,
-          weight: quantity.toString() || "0",
-          total_amount: (quantity * pricePerUnit).toFixed(2),
-          branch_name: item.orders?.shop_branches?.name || "Unknown Branch",
-          branch_address: item.orders?.shop_branches?.address || "Address not available",
-          branch_lat: item.orders?.shop_branches?.latitude || 0,
-          branch_lng: item.orders?.shop_branches?.longitude || 0,
-          driver_id: item.orders?.deliveries?.[0]?.driver_id || null,
-          delivery_status: item.orders?.deliveries?.[0]?.status || null,
-          started_at: item.started_at || new Date().toISOString(),
-        };
+      if (!orderItems || orderItems.length === 0) {
+        if (isMounted.current) {
+          setDeliveries([]);
+        }
+        return;
+      }
+
+      const orderIds = orderItems.map(item => item.order_id).filter(Boolean);
+
+      const { data: existingDeliveries, error: deliveriesError } = await supabase
+        .from("deliveries")
+        .select("order_id, driver_id")
+        .in("order_id", orderIds)
+        .not("driver_id", "is", null);
+
+      if (deliveriesError) {
+        console.error("Error checking existing deliveries:", deliveriesError);
+      }
+
+      const availableOrderItems = orderItems.filter(item => {
+        const hasDelivery = existingDeliveries?.some(delivery => delivery.order_id === item.order_id);
+        return !hasDelivery;
       });
 
-      setDeliveries(transformedDeliveries);
-    } catch (error: any) {
-      console.error("Error fetching deliveries:", error);
-      
-      // Fallback approach if the first query fails
-      try {
-        console.log("Trying fallback query...");
-        const branchId = await getDriverBranch();
-        if (!branchId) return;
-
-        const { data, error: fallbackError } = await supabase
-          .from("orders")
-          .select(`
-            id,
-            customer_name,
-            customer_contact,
-            delivery_location,
-            delivery_latitude,
-            delivery_longitude,
-            branch_id,
-            shop_branches!inner (
-              name,
-              address,
-              latitude,
-              longitude
-            ),
-            order_items!inner (
-              id,
-              status,
-              quantity,
-              price_per_unit,
-              started_at
-            ),
-            deliveries!left (
-              driver_id,
-              status
-            )
-          `)
-          .eq("branch_id", branchId)
-          .eq("order_items.status", "ready_for_delivery")
-          .is("deliveries.driver_id", null);
-
-        if (fallbackError) throw fallbackError;
-
-        const fallbackDeliveries: Delivery[] = (data || []).map((item: any) => {
-          const orderItem = item.order_items?.[0];
-          const quantity = orderItem?.quantity ? Number(orderItem.quantity) : 0;
-          const pricePerUnit = orderItem?.price_per_unit ? Number(orderItem.price_per_unit) : 0;
+      if (isMounted.current) {
+        const transformedDeliveries: Delivery[] = availableOrderItems.map((item: any) => {
+          const orderItem = item;
+          const order = item.orders;
+          
+          let method = null;
+          if (order?.shop_methods) {
+            if (Array.isArray(order.shop_methods) && order.shop_methods.length > 0) {
+              method = order.shop_methods[0];
+            } else if (typeof order.shop_methods === 'object') {
+              method = order.shop_methods;
+            }
+          }
+          
+          const quantity = orderItem.quantity ? Number(orderItem.quantity) : 0;
+          const pricePerUnit = orderItem.price_per_unit ? Number(orderItem.price_per_unit) : 0;
+          
+          console.log(`Order ${orderItem.order_id} - Method:`, method);
           
           return {
-            order_item_id: orderItem?.id || "",
-            order_item_status: orderItem?.status || "ready_for_delivery",
-            order_id: item.id || "",
-            customer_name: item.customer_name || "Unknown Customer",
-            customer_contact: item.customer_contact || "No contact",
-            delivery_location: item.delivery_location || "Address not provided",
-            delivery_latitude: item.delivery_latitude || 0,
-            delivery_longitude: item.delivery_longitude || 0,
+            order_item_id: orderItem.id || "",
+            order_item_status: orderItem.status || "ready_for_delivery",
+            order_id: orderItem.order_id || "",
+            customer_name: order?.customer_name || "Unknown Customer",
+            customer_contact: order?.customer_contact || "No contact",
+            delivery_location: order?.delivery_location || "Address not provided",
+            delivery_latitude: order?.delivery_latitude || 0,
+            delivery_longitude: order?.delivery_longitude || 0,
             weight: quantity.toString() || "0",
             total_amount: (quantity * pricePerUnit).toFixed(2),
-            branch_name: item.shop_branches?.name || "Unknown Branch",
-            branch_address: item.shop_branches?.address || "Address not available",
-            branch_lat: item.shop_branches?.latitude || 0,
-            branch_lng: item.shop_branches?.longitude || 0,
-            driver_id: item.deliveries?.[0]?.driver_id || null,
-            delivery_status: item.deliveries?.[0]?.status || null,
-            started_at: orderItem?.started_at || new Date().toISOString(),
+            branch_name: branchName,
+            branch_address: branchAddress,
+            branch_lat: branchLat,
+            branch_lng: branchLng,
+            driver_id: null,
+            delivery_status: null,
+            started_at: orderItem.started_at || new Date().toISOString(),
+            order_method: method?.code || "delivery",
+            order_method_label: method?.label || "Delivery",
           };
         });
 
-        // Manual sorting by started_at
-        fallbackDeliveries.sort((a, b) => 
-          new Date(a.started_at).getTime() - new Date(b.started_at).getTime()
-        );
+        setDeliveries(transformedDeliveries);
+        
+        console.log("All deliveries with order_method:", transformedDeliveries.map(d => ({
+          order_id: d.order_id,
+          order_method: d.order_method,
+          order_method_label: d.order_method_label,
+          customer_name: d.customer_name
+        })));
+      }
+    } catch (error: any) {
+      console.error("Error fetching deliveries:", error);
+      
+      try {
+        const branchId = await getDriverBranch(driverId);
+        if (!branchId) return;
 
-        setDeliveries(fallbackDeliveries);
+        const { data: branchData } = await supabase
+          .from("shop_branches")
+          .select("name, address")
+          .eq("id", branchId)
+          .single();
+
+        const branchName = branchData?.name || "Main Branch Hangyu Laundry Shop";
+        const branchAddress = branchData?.address || "Santa Rosa Street";
+
+        const { data: orders, error: ordersError } = await supabase
+          .from("orders")
+          .select("id, customer_name, customer_contact, delivery_location, delivery_latitude, delivery_longitude, method_id")
+          .eq("branch_id", branchId);
+
+        if (ordersError) throw ordersError;
+
+        if (!orders || orders.length === 0) {
+          if (isMounted.current) {
+            setDeliveries([]);
+          }
+          return;
+        }
+
+        // With:
+        const methodIds = orders
+          .map(order => order.method_id)
+          .filter((id): id is string => id !== null && id !== undefined);
+
+        // Then fetch shop methods
+        const { data: shopMethods, error: methodsError } = await supabase
+  .from("shop_methods")
+  .select("id, code, label")
+  .in("id", methodIds); // Now methodIds is properly typed as string[]
+
+        const orderIds = orders.map(order => order.id).filter(Boolean);
+        const { data: orderItems, error: itemsError } = await supabase
+          .from("order_items")
+          .select("id, status, quantity, price_per_unit, started_at, order_id")
+          .in("order_id", orderIds)
+          .eq("status", "ready_for_delivery")
+          .order("started_at", { ascending: true });
+
+        if (itemsError) throw itemsError;
+
+        if (!orderItems || orderItems.length === 0) {
+          if (isMounted.current) {
+            setDeliveries([]);
+          }
+          return;
+        }
+
+        const { data: existingDeliveries } = await supabase
+          .from("deliveries")
+          .select("order_id")
+          .in("order_id", orderIds)
+          .not("driver_id", "is", null);
+
+        const availableOrderItems = orderItems.filter(item => {
+          const hasDelivery = existingDeliveries?.some(delivery => delivery.order_id === item.order_id);
+          return !hasDelivery;
+        });
+
+        if (isMounted.current) {
+          const fallbackDeliveries: Delivery[] = availableOrderItems.map((orderItem: any) => {
+            const order = orders.find((o: any) => o.id === orderItem.order_id);
+            const method = shopMethods?.find((m: any) => m.id === order?.method_id);
+            
+            const quantity = orderItem.quantity ? Number(orderItem.quantity) : 0;
+            const pricePerUnit = orderItem.price_per_unit ? Number(orderItem.price_per_unit) : 0;
+            
+            return {
+              order_item_id: orderItem.id || "",
+              order_item_status: orderItem.status || "ready_for_delivery",
+              order_id: orderItem.order_id || "",
+              customer_name: order?.customer_name || "Unknown Customer",
+              customer_contact: order?.customer_contact || "No contact",
+              delivery_location: order?.delivery_location || "Address not provided",
+              delivery_latitude: order?.delivery_latitude || 0,
+              delivery_longitude: order?.delivery_longitude || 0,
+              weight: quantity.toString() || "0",
+              total_amount: (quantity * pricePerUnit).toFixed(2),
+              branch_name: branchName,
+              branch_address: branchAddress,
+              branch_lat: 0,
+              branch_lng: 0,
+              driver_id: null,
+              delivery_status: null,
+              started_at: orderItem.started_at || new Date().toISOString(),
+              order_method: method?.code || "delivery",
+              order_method_label: method?.label || "Delivery",
+            };
+          });
+
+          setDeliveries(fallbackDeliveries);
+        }
       } catch (fallbackError: any) {
-        Alert.alert("Error", fallbackError.message || "Failed to load deliveries");
+        console.error("Fallback error:", fallbackError);
+        if (isMounted.current) {
+          Alert.alert("Error", "Failed to load deliveries. Please try again.");
+          setDeliveries([]);
+        }
       }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (isMounted.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [getDriverBranch]);
 
-  // Combined fetch function
-  const fetchAllData = useCallback(async () => {
+  const fetchAllData = useCallback(async (driverId: string) => {
     await Promise.all([
-      fetchDeliveries(),
-      fetchActiveDelivery()
+      fetchDeliveries(driverId),
+      fetchActiveDelivery(driverId)
     ]);
   }, [fetchDeliveries, fetchActiveDelivery]);
 
-  // Navigate to map preview screen
-  const showMapPreview = (delivery: Delivery) => {
-    router.push({
-      pathname: "/delivery/map-preview",
-      params: {
-        order_item_id: delivery.order_item_id,
-        customer_name: delivery.customer_name,
-        delivery_location: delivery.delivery_location,
-        delivery_latitude: delivery.delivery_latitude.toString(),
-        delivery_longitude: delivery.delivery_longitude.toString(),
-        current_lat: currentLocation?.lat.toString() || "0",
-        current_lng: currentLocation?.lng.toString() || "0",
-        weight: delivery.weight,
-        total_amount: delivery.total_amount,
-        branch_name: delivery.branch_name,
-        branch_address: delivery.branch_address,
-        order_id: delivery.order_id,
+  const initializeApp = useCallback(async () => {
+    try {
+      if (isMounted.current) {
+        setAuthLoading(true);
       }
-    });
-  };
+      
+      const user = await getCurrentUser();
+      
+      if (!user) {
+        if (isMounted.current) {
+          setAuthError("Please log in to access deliveries");
+        }
+        return;
+      }
+      
+      if (isMounted.current) {
+        setCurrentDriverId(user.id);
+      }
+      await fetchAllData(user.id);
+    } catch (error: any) {
+      console.error("Error initializing app:", error);
+      if (isMounted.current) {
+        setAuthError(error.message || "Failed to initialize app");
+      }
+    } finally {
+      if (isMounted.current) {
+        setAuthLoading(false);
+      }
+    }
+  }, [getCurrentUser, fetchAllData]);
 
-  // Show confirmation modal (after map preview)
-  const showConfirmation = (orderItemId: string, orderId: string, customerName: string) => {
+  // Navigate to map preview screen (like pickup flow)
+  const showMapPreview = (delivery: Delivery) => {
+    if (!currentDriverId) {
+      Alert.alert("Error", "User not authenticated");
+      return;
+    }
+
     // Check if driver already has an active delivery
     if (activeDelivery) {
       Alert.alert(
@@ -478,153 +770,30 @@ export default function LaundryInfo() {
       return;
     }
 
-    setConfirmationModal({
-      visible: true,
-      orderItemId,
-      orderId,
-      customerName,
+    router.push({
+      pathname: "/delivery/map-preview",
+      params: {
+        order_item_id: delivery.order_item_id,
+        customer_name: delivery.customer_name,
+        delivery_location: delivery.delivery_location,
+        delivery_latitude: delivery.delivery_latitude.toString(),
+        delivery_longitude: delivery.delivery_longitude.toString(),
+        current_lat: currentLocation?.lat.toString() || "0",
+        current_lng: currentLocation?.lng.toString() || "0",
+        customer_contact: delivery.customer_contact,
+        weight: delivery.weight,
+        total_amount: delivery.total_amount,
+        branch_name: delivery.branch_name,
+        branch_address: delivery.branch_address,
+        order_id: delivery.order_id,
+        order_method: delivery.order_method || "delivery",
+        order_method_label: delivery.order_method_label || "Delivery",
+      }
     });
-  };
-
-  const hideConfirmation = () => {
-    setConfirmationModal({
-      visible: false,
-      orderItemId: "",
-      orderId: "",
-      customerName: "",
-    });
-  };
-
-  const takeDelivery = async (orderItemId: string, orderId: string, customerName: string) => {
-    try {
-      setTakingDeliveryId(orderItemId);
-      hideConfirmation();
-
-      // Double-check if driver already has an active delivery
-      const { data: existingActiveDelivery, error: activeCheckError } = await supabase
-        .from("deliveries")
-        .select("id")
-        .eq("driver_id", currentDriverId)
-        .in("status", ["assigned", "in_progress", "picked_up"])
-        .maybeSingle();
-
-      if (activeCheckError) throw activeCheckError;
-
-      if (existingActiveDelivery) {
-        Alert.alert(
-          "Already Have Active Delivery",
-          "You already have an active delivery. Please complete it before taking a new one.",
-          [
-            {
-              text: "Continue Current Delivery",
-              onPress: continueActiveDelivery
-            },
-            {
-              text: "OK",
-              style: "cancel"
-            }
-          ]
-        );
-        await fetchAllData();
-        return;
-      }
-
-      // First, check if delivery already exists to avoid race conditions
-      const { data: existingDelivery, error: checkError } = await supabase
-        .from("deliveries")
-        .select("id, driver_id")
-        .eq("order_id", orderId)
-        .maybeSingle();
-
-      if (checkError) throw checkError;
-
-      if (existingDelivery) {
-        if (existingDelivery.driver_id === currentDriverId) {
-          Alert.alert("Already Taken", "You have already taken this delivery.");
-        } else {
-          Alert.alert("Already Taken", "This delivery has already been taken by another driver.");
-        }
-        await fetchAllData();
-        return;
-      }
-
-      // Insert the delivery record
-      const { data: delivery, error: deliveryError } = await supabase
-        .from("deliveries")
-        .insert({
-          order_id: orderId,
-          driver_id: currentDriverId,
-          status: "in_progress",
-          assigned_at: new Date().toISOString(),
-          picked_up_at: new Date().toISOString(),
-        })
-        .select()
-        .single();
-
-      if (deliveryError) {
-        if (deliveryError.code === "42501") {
-          Alert.alert(
-            "Permission Denied", 
-            "You don't have permission to take deliveries. Please contact support."
-          );
-          return;
-        }
-        
-        if (deliveryError.code === "23505") {
-          Alert.alert("Already Taken", "This delivery has already been taken by another driver.");
-          await fetchAllData();
-          return;
-        }
-        throw deliveryError;
-      }
-
-      // Update order item status
-      const { error: orderItemError } = await supabase
-        .from("order_items")
-        .update({
-          status: "out_for_delivery",
-        })
-        .eq("id", orderItemId);
-
-      if (orderItemError) throw orderItemError;
-
-      // Success - automatically navigate to delivery tracking
-      const deliveryItem = deliveries.find(d => d.order_item_id === orderItemId);
-      if (delivery && deliveryItem) {
-        router.push({
-          pathname: "/delivery/[id]",
-          params: {
-            id: delivery.id,
-            orderId: orderId,
-            customerName: customerName,
-            customerContact: deliveryItem.customer_contact,
-            deliveryLocation: deliveryItem.delivery_location,
-            deliveryLat: deliveryItem.delivery_latitude.toString(),
-            deliveryLng: deliveryItem.delivery_longitude.toString(),
-          }
-        });
-      }
-
-      await fetchAllData();
-      
-    } catch (error: any) {
-      console.error("Error taking delivery:", error);
-      
-      if (error.code === "42501") {
-        Alert.alert(
-          "Security Policy", 
-          "Unable to take delivery due to security restrictions."
-        );
-      } else {
-        Alert.alert("Error", error.message || "Failed to take delivery");
-      }
-    } finally {
-      setTakingDeliveryId(null);
-    }
   };
 
   const continueActiveDelivery = () => {
-    if (activeDelivery?.delivery_id) {
+    if (activeDelivery?.delivery_id && isMounted.current) {
       router.push({
         pathname: "/delivery/[id]",
         params: {
@@ -635,19 +804,24 @@ export default function LaundryInfo() {
           deliveryLocation: activeDelivery.delivery_location,
           deliveryLat: activeDelivery.delivery_latitude.toString(),
           deliveryLng: activeDelivery.delivery_longitude.toString(),
+          orderMethod: activeDelivery.order_method || "delivery",
         }
       });
     }
   };
 
-  // Pull-to-refresh handler
   const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await fetchAllData();
-  }, [fetchAllData]);
+    if (!currentDriverId || !isMounted.current) return;
+    
+    if (isMounted.current) {
+      setRefreshing(true);
+    }
+    await fetchAllData(currentDriverId);
+  }, [fetchAllData, currentDriverId]);
 
-  // Fixed useEffect with proper cleanup
   useEffect(() => {
+    if (!currentDriverId) return;
+
     const subscription = supabase
       .channel("order_items_changes")
       .on(
@@ -658,32 +832,35 @@ export default function LaundryInfo() {
           table: "order_items",
           filter: "status=eq.ready_for_delivery",
         },
-        () => fetchAllData()
+        () => fetchAllData(currentDriverId)
       )
       .subscribe();
 
     return () => {
       subscription.unsubscribe();
     };
-  }, [fetchAllData]);
+  }, [fetchAllData, currentDriverId]);
 
-  // Initial data fetch
   useEffect(() => {
-    fetchAllData();
-  }, [fetchAllData]);
+    isMounted.current = true;
+    initializeApp();
 
-  // Fixed location tracking with proper cleanup
+    return () => {
+      isMounted.current = false;
+    };
+  }, [initializeApp]);
+
   useEffect(() => {
-    let isMounted = true;
+    let locationMounted = true;
     let watchId: Location.LocationSubscription | null = null;
 
     const setupLocation = async () => {
       try {
         let { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== "granted" || !isMounted) return;
+        if (status !== "granted" || !locationMounted) return;
 
         let location = await Location.getCurrentPositionAsync({});
-        if (isMounted) {
+        if (locationMounted && isMounted.current) {
           setCurrentLocation({ lat: location.coords.latitude, lng: location.coords.longitude });
         }
 
@@ -694,7 +871,7 @@ export default function LaundryInfo() {
             distanceInterval: 5,
           },
           (loc) => {
-            if (isMounted) {
+            if (locationMounted && isMounted.current) {
               setCurrentLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude });
             }
           }
@@ -707,16 +884,36 @@ export default function LaundryInfo() {
     setupLocation();
 
     return () => {
-      isMounted = false;
+      locationMounted = false;
       if (watchId) {
         watchId.remove();
       }
     };
   }, []);
 
-  const handleScroll = useCallback(() => {
-    setVisibleItems(new Set(deliveries.map((d) => d.order_item_id)));
-  }, [deliveries]);
+  if (authLoading) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
+        <ActivityIndicator size="large" color="#3864C3" />
+        <Text style={{ marginTop: 10, color: "#3864C3", fontSize: moderateScale(16) }}>
+          Loading user information...
+        </Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (authError) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
+        <Ionicons name="warning-outline" size={48} color="#ff6b35" />
+        <Text style={styles.errorTitle}>Authentication Error</Text>
+        <Text style={styles.errorText}>{authError}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={initializeApp}>
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
 
   if (loading && !refreshing) {
     return (
@@ -728,220 +925,189 @@ export default function LaundryInfo() {
   }
 
   return (
-    <SafeAreaView style={[styles.container]}>
-      {/* Header matching the map screen style */}
-      <View style={styles.headerBox}>
-        <Svg width="100%" height={verticalScale(90)} viewBox="0 0 1440 320" style={styles.waveTop} preserveAspectRatio="none">
-          <Path fill="#3864C3" d="M0,64 C720,-32 720,160 1440,64 L1440,0 L0,0 Z" />
-        </Svg>
-        <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>DELIVERIES ({deliveries.length})</Text>
-          <TouchableOpacity onPress={fetchAllData} style={styles.refreshButton}>
-            <Ionicons name="refresh" size={24} color="white" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <ScrollView
-        ref={scrollViewRef}
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: verticalScale(100) }}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={["#3864C3"]}
-            tintColor="#3864C3"
-          />
-        }
-      >
-        {/* Active Delivery Section */}
-        {activeDelivery && (
-          <View style={styles.activeDeliveryContainer}>
-            <View style={styles.activeDeliveryHeader}>
-              <Ionicons name="navigate-circle" size={24} color="#28a745" />
-              <Text style={styles.activeDeliveryTitle}>Active Delivery</Text>
-              <View style={styles.activeDeliveryBadge}>
-                <Text style={styles.activeDeliveryBadgeText}>IN PROGRESS</Text>
-              </View>
-            </View>
-            
-            <View style={styles.activeDeliveryContent}>
-              <Text style={styles.activeDeliveryCustomer}>{activeDelivery.customer_name}</Text>
-              <Text style={styles.activeDeliveryAddress}>{activeDelivery.delivery_location}</Text>
-              <View style={styles.activeDeliveryDetails}>
-                <Text style={styles.activeDeliveryDetail}>Weight: {activeDelivery.weight} kg</Text>
-                <Text style={styles.activeDeliveryDetail}>Amount: ₱{activeDelivery.total_amount}</Text>
-              </View>
-            </View>
-
+    <ErrorBoundary>
+      <SafeAreaView style={[styles.container]}>
+        <AppHeader 
+          title={`DELIVERIES (${deliveries.length})`}
+          rightElement={
             <TouchableOpacity 
-              style={styles.continueButton}
-              onPress={continueActiveDelivery}
+              onPress={() => currentDriverId && fetchAllData(currentDriverId)} 
+              style={styles.refreshButton}
             >
-              <Ionicons name="play-circle" size={20} color="white" />
-              <Text style={styles.continueButtonText}>CONTINUE DELIVERY</Text>
+              <Ionicons name="refresh" size={24} color="white" />
             </TouchableOpacity>
-          </View>
-        )}
+          }
+        />
 
-        <View style={styles.infoBox}>
-          <Text style={styles.infoTitle}>
-            You are assigned to {deliveries[0]?.branch_name || "Main Branch Hangyu Laundry Shop"}
-          </Text>
-          <Text style={styles.infoDesc}>Address: {deliveries[0]?.branch_address || "Santa Rosa Street"}</Text>
-          <Text style={styles.infoDesc}>
-            {activeDelivery 
-              ? "You have an active delivery. Complete it to take new orders." 
-              : `Available Deliveries: ${deliveries.length}`
-            }
-          </Text>
-          <Text style={[styles.infoDesc, { fontSize: moderateScale(12), color: "#666" }]}>
-            {activeDelivery 
-              ? "One delivery at a time - complete your current delivery first"
-              : "Tap 'VIEW ROUTE' to see delivery details and map"
-            }
-          </Text>
-        </View>
+        <ScrollView
+          ref={scrollViewRef}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: verticalScale(100) }}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={["#3864C3"]}
+              tintColor="#3864C3"
+            />
+          }
+        >
+          {activeDelivery && (
+            <View style={styles.activeDeliveryContainer}>
+              <View style={styles.activeDeliveryHeader}>
+                <Ionicons name="navigate-circle" size={24} color="#28a745" />
+                <Text style={styles.activeDeliveryTitle}>Active Delivery</Text>
+                <View style={[
+                  styles.activeDeliveryBadge,
+                  activeDelivery.order_method === "pickup" ? styles.pickupBadge : styles.deliveryBadge
+                ]}>
+                  <Text style={styles.activeDeliveryBadgeText}>
+                    {activeDelivery.order_method === "pickup" ? "🔄 PICKUP RETURN" : "📦 DELIVERY"}
+                  </Text>
+                </View>
+              </View>
+              
+              <View style={styles.activeDeliveryContent}>
+                <Text style={styles.activeDeliveryCustomer}>{activeDelivery.customer_name}</Text>
+                <Text style={styles.activeDeliveryAddress}>{activeDelivery.delivery_location}</Text>
+                <View style={styles.activeDeliveryDetails}>
+                  <Text style={styles.activeDeliveryDetail}>Weight: {activeDelivery.weight} kg</Text>
+                  <Text style={styles.activeDeliveryDetail}>Amount: ₱{activeDelivery.total_amount}</Text>
+                </View>
+              </View>
 
-        {deliveries.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="checkmark-done-circle" size={48} color="#ccc" />
-            <Text style={styles.emptyStateTitle}>
-              {activeDelivery ? "Complete your current delivery first" : "No deliveries available"}
+              <TouchableOpacity 
+                style={styles.continueButton}
+                onPress={continueActiveDelivery}
+              >
+                <Ionicons name="play-circle" size={20} color="white" />
+                <Text style={styles.continueButtonText}>CONTINUE DELIVERY</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <View style={styles.infoBox}>
+            <Text style={styles.infoTitle}>
+              You are assigned to {deliveries[0]?.branch_name || "Main Branch Hangyu Laundry Shop"}
             </Text>
-            <Text style={styles.emptyStateText}>
+            <Text style={styles.infoDesc}>Address: {deliveries[0]?.branch_address || "Santa Rosa Street"}</Text>
+            <Text style={styles.infoDesc}>
               {activeDelivery 
-                ? "You can only handle one delivery at a time.\nComplete your current delivery to see new orders."
-                : "All current deliveries have been assigned.\nCheck back later for new orders."
+                ? "You have an active delivery. Complete it to take new orders." 
+                : `Available Deliveries: ${deliveries.length}`
               }
             </Text>
-            <TouchableOpacity style={styles.refreshLargeButton} onPress={fetchAllData}>
-              <Text style={styles.refreshLargeText}>Refresh</Text>
-            </TouchableOpacity>
+            <Text style={[styles.infoDesc, { fontSize: moderateScale(12), color: "#666" }]}>
+              {activeDelivery 
+                ? "One delivery at a time - complete your current delivery first"
+                : "Includes both new deliveries and pickup returns"
+              }
+            </Text>
           </View>
-        ) : (
-          deliveries.map((item) => (
-            <TouchableOpacity
-              key={item.order_item_id}
-              style={[
-                styles.card,
-                takingDeliveryId === item.order_item_id && styles.cardDisabled,
-                activeDelivery && styles.cardDisabled // Disable all cards if there's an active delivery
-              ]}
-              onPress={() => showMapPreview(item)}
-              disabled={takingDeliveryId === item.order_item_id || activeDelivery !== null}
-            >
-              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.cardTitle}>For: {item.customer_name}</Text>
-                  <Text style={styles.cardText}>{item.delivery_location}</Text>
-                  <View style={styles.contactRow}>
-                    <Ionicons name="scale-outline" size={16} color="#000" />
-                    <Text style={styles.contactText}>{item.weight} kg</Text>
-                  </View>
-                  <View style={styles.contactRow}>
-                    <Ionicons name="cash-outline" size={16} color="#000" />
-                    <Text style={styles.contactText}>₱{item.total_amount}</Text>
-                  </View>
-                  <View style={styles.contactRow}>
-                    <Ionicons name="call-outline" size={16} color="#000" />
-                    <Text style={styles.contactText}>{item.customer_contact}</Text>
-                  </View>
-                  <View style={styles.contactRow}>
-                    <Ionicons name="time-outline" size={14} color="#666" />
-                    <Text style={[styles.contactText, { color: "#666", fontSize: moderateScale(11) }]}>
-                      Ready: {new Date(item.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </Text>
-                  </View>
-                  {activeDelivery && (
-                    <View style={styles.oneAtATimeWarning}>
-                      <Ionicons name="warning" size={14} color="#ff6b35" />
-                      <Text style={styles.oneAtATimeText}>Complete current delivery first</Text>
+
+          {deliveries.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="checkmark-done-circle" size={48} color="#ccc" />
+              <Text style={styles.emptyStateTitle}>
+                {activeDelivery ? "Complete your current delivery first" : "No deliveries available"}
+              </Text>
+              <Text style={styles.emptyStateText}>
+                {activeDelivery 
+                  ? "You can only handle one delivery at a time.\nComplete your current delivery to see new orders."
+                  : "All current deliveries have been assigned.\nCheck back later for new orders."
+                }
+              </Text>
+              <TouchableOpacity 
+                style={styles.refreshLargeButton} 
+                onPress={() => currentDriverId && fetchAllData(currentDriverId)}
+              >
+                <Text style={styles.refreshLargeText}>Refresh</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            deliveries.map((item) => (
+              <TouchableOpacity
+                key={item.order_item_id}
+                style={[
+                  styles.card,
+                  takingDeliveryId === item.order_item_id && styles.cardDisabled,
+                  activeDelivery && styles.cardDisabled
+                ]}
+                onPress={() => showMapPreview(item)}
+                disabled={takingDeliveryId === item.order_item_id || activeDelivery !== null}
+              >
+                <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                  <View style={{ flex: 1 }}>
+                    <View style={[
+                      styles.orderMethodBadge,
+                      item.order_method === "pickup" ? styles.pickupBadge : styles.deliveryBadge
+                    ]}>
+                      <Text style={styles.orderMethodBadgeText}>
+                        {item.order_method === "pickup" ? "🔄 PICKUP RETURN" : "📦 DELIVERY"}
+                      </Text>
                     </View>
-                  )}
+                    
+                    <Text style={styles.cardTitle}>For: {item.customer_name}</Text>
+                    <Text style={styles.cardText}>{item.delivery_location}</Text>
+                    <View style={styles.contactRow}>
+                      <Ionicons name="scale-outline" size={16} color="#000" />
+                      <Text style={styles.contactText}>{item.weight} kg</Text>
+                    </View>
+                    <View style={styles.contactRow}>
+                      <Ionicons name="cash-outline" size={16} color="#000" />
+                      <Text style={styles.contactText}>₱{item.total_amount}</Text>
+                    </View>
+                    <View style={styles.contactRow}>
+                      <Ionicons name="call-outline" size={16} color="#000" />
+                      <Text style={styles.contactText}>{item.customer_contact}</Text>
+                    </View>
+                    <View style={styles.contactRow}>
+                      <Ionicons name="time-outline" size={14} color="#666" />
+                      <Text style={[styles.contactText, { color: "#666", fontSize: moderateScale(11) }]}>
+                        Ready: {new Date(item.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </Text>
+                    </View>
+                    {activeDelivery && (
+                      <View style={styles.oneAtATimeWarning}>
+                        <Ionicons name="warning" size={14} color="#ff6b35" />
+                        <Text style={styles.oneAtATimeText}>Complete current delivery first</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={{ alignItems: "center" }}>
+                    <TouchableOpacity
+                      style={[
+                        styles.takeButton,
+                        { 
+                          backgroundColor: takingDeliveryId === item.order_item_id 
+                            ? "#ccc" 
+                            : activeDelivery 
+                            ? "#6c757d" 
+                            : "#28a745" 
+                        },
+                      ]}
+                      onPress={() => showMapPreview(item)}
+                      disabled={takingDeliveryId === item.order_item_id || activeDelivery !== null}
+                    >
+                      <Text style={styles.takeButtonText}>
+                        {activeDelivery ? "UNAVAILABLE" : "VIEW ROUTE"}
+                      </Text>
+                    </TouchableOpacity>
+                    <MiniMap 
+                      destination={{ lat: item.delivery_latitude, lng: item.delivery_longitude }} 
+                      orderItemId={item.order_item_id}
+                      currentLocation={currentLocation}
+                    />
+                  </View>
                 </View>
-
-                <View style={{ alignItems: "center" }}>
-                  <TouchableOpacity
-                    style={[
-                      styles.takeButton,
-                      { 
-                        backgroundColor: takingDeliveryId === item.order_item_id 
-                          ? "#ccc" 
-                          : activeDelivery 
-                          ? "#6c757d" 
-                          : "#28a745" 
-                      },
-                    ]}
-                    onPress={() => showMapPreview(item)}
-                    disabled={takingDeliveryId === item.order_item_id || activeDelivery !== null}
-                  >
-                    <Text style={styles.takeButtonText}>
-                      {activeDelivery ? "UNAVAILABLE" : "VIEW ROUTE"}
-                    </Text>
-                  </TouchableOpacity>
-                  <MiniMap 
-                    destination={{ lat: item.delivery_latitude, lng: item.delivery_longitude }} 
-                    orderItemId={item.order_item_id}
-                    currentLocation={currentLocation}
-                    visibleItems={visibleItems}
-                  />
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))
-        )}
-      </ScrollView>
-
-      {/* Confirmation Modal */}
-      <Modal
-        visible={confirmationModal.visible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={hideConfirmation}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Ionicons name="car-sport" size={32} color="#3864C3" />
-              <Text style={styles.modalTitle}>Start Delivery?</Text>
-            </View>
-            
-            <Text style={styles.modalMessage}>
-              Are you sure you want to start this delivery now?
-            </Text>
-
-            <Text style={styles.deliveryDetails}>
-              Customer: {confirmationModal.customerName}
-            </Text>
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={hideConfirmation}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.confirmButton]}
-                onPress={() => takeDelivery(
-                  confirmationModal.orderItemId, 
-                  confirmationModal.orderId, 
-                  confirmationModal.customerName
-                )}
-              >
-                <Text style={styles.confirmButtonText}>Start Delivery</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </SafeAreaView>
+            ))
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    </ErrorBoundary>
   );
 }
 
@@ -950,42 +1116,41 @@ const styles = StyleSheet.create({
     flex: 1, 
     backgroundColor: "#FFFFFF" 
   },
-  // Header styles matching the map screen
-  headerBox: {
-    width: '100%',
-    height: verticalScale(90),
-    backgroundColor: '#0AADFF',
+  errorContainer: {
+    flex: 1,
     justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  waveTop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    zIndex: 1,
-  },
-  headerContent: {
-    flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: scale(20),
-    zIndex: 2,
-    width: '100%',
-    marginTop: verticalScale(30),
+    padding: scale(20),
+    backgroundColor: '#FFFFFF',
   },
-  headerTitle: {
+  errorTitle: {
     fontSize: moderateScale(18),
     fontWeight: 'bold',
-    color: 'white',
+    color: '#333',
+    marginTop: verticalScale(16),
+    marginBottom: verticalScale(8),
+  },
+  errorText: {
+    fontSize: moderateScale(14),
+    color: '#666',
     textAlign: 'center',
-    position: 'absolute',
-    left: 0,
-    right: 0,
+    lineHeight: moderateScale(20),
+    marginBottom: verticalScale(20),
+  },
+  retryButton: {
+    backgroundColor: '#3864C3',
+    paddingHorizontal: scale(20),
+    paddingVertical: verticalScale(12),
+    borderRadius: scale(8),
+  },
+  retryButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: moderateScale(14),
   },
   refreshButton: {
-    marginLeft: 'auto',
     zIndex: 3,
   },
-  // Active Delivery Styles
   activeDeliveryContainer: {
     backgroundColor: '#f0f9f0',
     margin: scale(10),
@@ -1012,7 +1177,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   activeDeliveryBadge: {
-    backgroundColor: '#28a745',
     paddingHorizontal: scale(8),
     paddingVertical: verticalScale(4),
     borderRadius: scale(12),
@@ -1058,7 +1222,24 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: moderateScale(12),
   },
-  // One at a time warning
+  orderMethodBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: scale(8),
+    paddingVertical: verticalScale(4),
+    borderRadius: scale(6),
+    marginBottom: verticalScale(8),
+  },
+  deliveryBadge: {
+    backgroundColor: '#3864C3',
+  },
+  pickupBadge: {
+    backgroundColor: '#FF6B35',
+  },
+  orderMethodBadgeText: {
+    color: 'white',
+    fontSize: moderateScale(10),
+    fontWeight: 'bold',
+  },
   oneAtATimeWarning: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1073,7 +1254,52 @@ const styles = StyleSheet.create({
     marginLeft: scale(4),
     fontWeight: '500',
   },
-  // Rest of the styles remain the same
+  mapContainer: {
+    width: scale(100),
+    height: scale(100),
+    borderRadius: scale(10),
+    overflow: "hidden",
+    backgroundColor: "#f0f0f0",
+  },
+  mapPlaceholder: {
+    width: scale(100),
+    height: scale(100),
+    borderRadius: scale(10),
+    backgroundColor: "#f0f0f0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  mapPlaceholderText: { 
+    fontSize: moderateScale(8), 
+    color: "#888", 
+    marginTop: 5, 
+    textAlign: 'center' 
+  },
+  mapLoadingContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+  },
+  mapLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(240, 240, 240, 0.8)',
+  },
+  mapLoadingText: {
+    fontSize: moderateScale(10),
+    color: '#3864C3',
+    marginTop: 5,
+  },
   infoBox: {
     backgroundColor: "#D4F6F9",
     padding: scale(20),
@@ -1113,22 +1339,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold", 
     fontSize: moderateScale(12) 
   },
-  mapContainer: {
-    width: scale(100),
-    height: scale(100),
-    borderRadius: scale(10),
-    overflow: "hidden",
-    backgroundColor: "#f0f0f0",
-  },
-  mapPlaceholder: {
-    width: scale(100),
-    height: scale(100),
-    borderRadius: scale(10),
-    backgroundColor: "#f0f0f0",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  mapPlaceholderText: { fontSize: moderateScale(8), color: "#888", marginTop: 5, textAlign: 'center' },
   emptyState: {
     alignItems: 'center',
     paddingVertical: verticalScale(40),
@@ -1157,75 +1367,6 @@ const styles = StyleSheet.create({
   refreshLargeText: {
     color: 'white',
     fontWeight: 'bold',
-    fontSize: moderateScale(14),
-  },
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: scale(20),
-  },
-  modalContent: {
-    backgroundColor: 'white',
-    borderRadius: scale(16),
-    padding: scale(24),
-    width: '100%',
-    maxWidth: scale(320),
-    alignItems: 'center',
-  },
-  modalHeader: {
-    alignItems: 'center',
-    marginBottom: verticalScale(16),
-  },
-  modalTitle: {
-    fontSize: moderateScale(20),
-    fontWeight: 'bold',
-    color: '#333',
-    marginTop: verticalScale(8),
-  },
-  modalMessage: {
-    fontSize: moderateScale(16),
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: moderateScale(22),
-    marginBottom: verticalScale(12),
-  },
-  deliveryDetails: {
-    fontSize: moderateScale(14),
-    color: '#3864C3',
-    fontWeight: '600',
-    marginBottom: verticalScale(20),
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '100%',
-    gap: scale(12),
-  },
-  modalButton: {
-    flex: 1,
-    paddingVertical: verticalScale(12),
-    borderRadius: scale(8),
-    alignItems: 'center',
-  },
-  cancelButton: {
-    backgroundColor: '#f8f9fa',
-    borderWidth: 1,
-    borderColor: '#dee2e6',
-  },
-  confirmButton: {
-    backgroundColor: '#28a745',
-  },
-  cancelButtonText: {
-    color: '#333',
-    fontWeight: '600',
-    fontSize: moderateScale(14),
-  },
-  confirmButtonText: {
-    color: 'white',
-    fontWeight: '600',
     fontSize: moderateScale(14),
   },
 });

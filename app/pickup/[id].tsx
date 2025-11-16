@@ -1,6 +1,6 @@
-// app/delivery/[id].tsx - COMPLETE FIXED VERSION WITH CLEANUP
+// app/pickup/[id].tsx - PICKUP TRACKING VERSION
+// Add this import with your other imports
 import { supabase } from "@/hooks/supabaseClient";
-import { useDriverLocation } from '@/hooks/useDriverLocation';
 import { useNotifications } from '@/hooks/useNotification';
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -27,8 +27,8 @@ import {
 import { moderateScale, scale, verticalScale } from "react-native-size-matters";
 import Svg, { Path } from "react-native-svg";
 import { WebView } from "react-native-webview";
-// FIXED: Include out_for_delivery status
-type DeliveryStatus = "out_for_delivery" | "delivered";
+
+type PickupStatus = "in_progress" | "collected" | "delivered_to_shop";
 
 // Fixed type to match Expo Location's actual return types
 type LocationCoords = {
@@ -131,22 +131,22 @@ const isValidPhoneNumber = (phone: string): boolean => {
   return phoneRegex.test(phone.replace(/[\s\-\(\)]/g, ''));
 };
 
-// Cache delivery data for offline support
-const cacheDeliveryData = async (deliveryId: string, data: any) => {
+// Cache pickup data for offline support
+const cachePickupData = async (pickupId: string, data: any) => {
   try {
-    await AsyncStorage.setItem(`delivery_${deliveryId}`, JSON.stringify({
+    await AsyncStorage.setItem(`pickup_${pickupId}`, JSON.stringify({
       ...data,
       cachedAt: Date.now()
     }));
   } catch (error) {
-    debugLog('CACHE', 'Error caching delivery data', error);
+    debugLog('CACHE', 'Error caching pickup data', error);
   }
 };
 
-// Get cached delivery data
-const getCachedDeliveryData = async (deliveryId: string) => {
+// Get cached pickup data
+const getCachedPickupData = async (pickupId: string) => {
   try {
-    const cached = await AsyncStorage.getItem(`delivery_${deliveryId}`);
+    const cached = await AsyncStorage.getItem(`pickup_${pickupId}`);
     if (cached) {
       const data = JSON.parse(cached);
       if (Date.now() - data.cachedAt < 3600000) {
@@ -159,9 +159,9 @@ const getCachedDeliveryData = async (deliveryId: string) => {
   return null;
 };
 
-// Static HTML template with wrong-turn detection and route recalculation - OPTIMIZED
-const getMapHTML = (deliveryLat: number, deliveryLng: number, customerName: string, isFullScreen: boolean = false) => {
-  debugLog('HTML_GENERATOR', `Creating HTML for ${isFullScreen ? 'FULL' : 'PREVIEW'} map`);
+// Static HTML template for pickup - ORANGE THEME
+const getMapHTML = (pickupLat: number, pickupLng: number, customerName: string, isFullScreen: boolean = false) => {
+  debugLog('HTML_GENERATOR', `Creating PICKUP HTML for ${isFullScreen ? 'FULL' : 'PREVIEW'} map`);
   
   return `
     <!DOCTYPE html>
@@ -223,7 +223,7 @@ const getMapHTML = (deliveryLat: number, deliveryLng: number, customerName: stri
           .route-info-value {
             font-size: 14px;
             font-weight: bold;
-            color: #007AFF;
+            color: #FF6B35;
           }
           
           .user-marker {
@@ -232,6 +232,15 @@ const getMapHTML = (deliveryLat: number, deliveryLng: number, customerName: stri
             border-radius: 50%;
             width: 20px;
             height: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+          }
+          
+          .pickup-marker {
+            background: #FF6B35;
+            border: 3px solid white;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.3);
           }
           
@@ -299,14 +308,14 @@ const getMapHTML = (deliveryLat: number, deliveryLng: number, customerName: stri
             box-shadow: 0 8px 30px rgba(0,0,0,0.2);
             z-index: 1000;
             display: ${isFullScreen ? 'block' : 'none'};
-            border: 2px solid #34C759;
+            border: 2px solid #FF6B35;
           }
 
           .next-turn {
             padding: 20px;
             display: flex;
             align-items: center;
-            background: linear-gradient(135deg, #34C759, #2EBA52);
+            background: linear-gradient(135deg, #FF6B35, #FF5722);
           }
 
           .next-turn-icon {
@@ -337,7 +346,7 @@ const getMapHTML = (deliveryLat: number, deliveryLng: number, customerName: stri
             padding: 20px;
             display: flex;
             align-items: center;
-            background: linear-gradient(135deg, #FF9500, #FF8A00);
+            background: linear-gradient(135deg, #34C759, #2EBA52);
           }
 
           .arrival-icon {
@@ -349,7 +358,7 @@ const getMapHTML = (deliveryLat: number, deliveryLng: number, customerName: stri
 
           .arrival-text {
             font-size: 18px;
-            fontWeight: 600;
+            font-weight: 600;
             color: white;
             flex: 1;
           }
@@ -371,7 +380,7 @@ const getMapHTML = (deliveryLat: number, deliveryLng: number, customerName: stri
       </head>
       <body>
         <div id="loadingOverlay" class="loading-overlay">
-          <div style="width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #007AFF; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+          <div style="width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #FF6B35; border-radius: 50%; animation: spin 1s linear infinite;"></div>
           <div class="loading-text">Loading map...</div>
         </div>
         
@@ -411,10 +420,10 @@ const getMapHTML = (deliveryLat: number, deliveryLng: number, customerName: stri
           </div>
         </div>
 
-        <div id="arrivalPanel" class="navigation-panel" style="display: none; border-color: #FF9500;">
+        <div id="arrivalPanel" class="navigation-panel" style="display: none; border-color: #34C759;">
           <div class="arrival-instruction">
             <div class="arrival-icon">🏁</div>
-            <div class="arrival-text">You have arrived at your destination</div>
+            <div class="arrival-text">You have arrived at pickup location</div>
           </div>
         </div>
         ` : ''}
@@ -570,13 +579,13 @@ const getMapHTML = (deliveryLat: number, deliveryLng: number, customerName: stri
             
             if (!navPanel || !arrivalPanel || !nextTurnText || !nextTurnDistance) return;
 
-            const distanceToDestination = map.distance([userLat, userLng], [${deliveryLat}, ${deliveryLng}]);
-            debugLog('NAVIGATION', \`Distance to destination: \${distanceToDestination.toFixed(1)}m\`);
+            const distanceToDestination = map.distance([userLat, userLng], [${pickupLat}, ${pickupLng}]);
+            debugLog('NAVIGATION', \`Distance to pickup: \${distanceToDestination.toFixed(1)}m\`);
             
             if (distanceToDestination <= ARRIVAL_DISTANCE_METERS) {
               navPanel.style.display = 'none';
               arrivalPanel.style.display = 'block';
-              debugLog('NAVIGATION', 'Showing arrival panel');
+              debugLog('NAVIGATION', 'Showing arrival panel - at pickup location');
               return;
             } else {
               arrivalPanel.style.display = 'none';
@@ -649,15 +658,17 @@ const getMapHTML = (deliveryLat: number, deliveryLng: number, customerName: stri
               attribution: '© OpenStreetMap'
             }).addTo(map);
 
-            const destMarker = L.circleMarker([${deliveryLat}, ${deliveryLng}], {
+            // PICKUP MARKER - Orange theme
+            const pickupMarker = L.circleMarker([${pickupLat}, ${pickupLng}], {
               radius: 8,
-              fillColor: "#FF3B30",
+              fillColor: "#FF6B35",
               color: "white",
               weight: 3,
               opacity: 1,
-              fillOpacity: 0.8
-            }).addTo(map).bindPopup("Delivery: ${customerName}");
-            debugLog('MARKER', 'Destination marker added');
+              fillOpacity: 0.8,
+              className: 'pickup-marker'
+            }).addTo(map).bindPopup("Pickup: ${customerName}");
+            debugLog('MARKER', 'Pickup marker added');
 
             setTimeout(() => {
               map.invalidateSize();
@@ -703,7 +714,7 @@ const getMapHTML = (deliveryLat: number, deliveryLng: number, customerName: stri
             }
             
             lastRoutingTime = now;
-            debugLog('ROUTING', 'Setting up routing', { userLat, userLng, forceRecalculation });
+            debugLog('ROUTING', 'Setting up routing to PICKUP location', { userLat, userLng, forceRecalculation });
             
             if (routeControl) {
               try {
@@ -717,10 +728,10 @@ const getMapHTML = (deliveryLat: number, deliveryLng: number, customerName: stri
             routeControl = L.Routing.control({
               waypoints: [
                 L.latLng(userLat, userLng),
-                L.latLng(${deliveryLat}, ${deliveryLng})
+                L.latLng(${pickupLat}, ${pickupLng})
               ],
               lineOptions: {
-                styles: [{ color: '#007AFF', weight: 6, opacity: 0.8 }]
+                styles: [{ color: '#FF6B35', weight: 6, opacity: 0.8 }] // Orange route for pickup
               },
               routeWhileDragging: false,
               showAlternatives: false,
@@ -739,7 +750,7 @@ const getMapHTML = (deliveryLat: number, deliveryLng: number, customerName: stri
                 const totalDistance = (route.summary.totalDistance / 1000).toFixed(1);
                 const totalTime = Math.round(route.summary.totalTime / 60);
                 
-                debugLog('ROUTING', 'Route calculated', { distance: totalDistance, time: totalTime, forceRecalculation });
+                debugLog('ROUTING', 'Route to PICKUP calculated', { distance: totalDistance, time: totalTime, forceRecalculation });
                 
                 currentRoute = route;
                 currentInstructions = extractInstructions(route);
@@ -770,7 +781,7 @@ const getMapHTML = (deliveryLat: number, deliveryLng: number, customerName: stri
             routeControl.on('routingerror', function(e) {
               isRecalculating = false;
               debugLog('ROUTING', 'Routing error', e.error);
-              const straightDistance = map.distance([userLat, userLng], [${deliveryLat}, ${deliveryLng}]) / 1000;
+              const straightDistance = map.distance([userLat, userLng], [${pickupLat}, ${pickupLng}]) / 1000;
               const fallbackTime = Math.round((straightDistance / 30) * 60);
               
               debugLog('ROUTING', 'Using fallback distance', { distance: straightDistance, time: fallbackTime });
@@ -889,16 +900,15 @@ const getMapHTML = (deliveryLat: number, deliveryLng: number, customerName: stri
   `;
 };
 
-export default function DeliveryTracking() {
+export default function PickupTracking() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { sendCustomerNotification } = useNotifications();
   
+  const { sendCustomerNotification } = useNotifications();
   const webViewRef = useRef<WebView>(null);
   const fullMapWebViewRef = useRef<WebView>(null);
   const [currentLocation, setCurrentLocation] = useState<LocationCoords | null>(null);
-  // FIXED: Use out_for_delivery as initial state
-  const [deliveryStatus, setDeliveryStatus] = useState<DeliveryStatus>("out_for_delivery");
+  const [pickupStatus, setPickupStatus] = useState<PickupStatus>("in_progress");
   const [isUpdating, setIsUpdating] = useState(false);
   const [distance, setDistance] = useState<string>("Calculating...");
   const [eta, setEta] = useState<string>("Calculating...");
@@ -917,28 +927,25 @@ export default function DeliveryTracking() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   // Extract parameters with fallbacks
-  const deliveryId = params.id as string;
+  const pickupId = params.id as string;
   const orderId = params.orderId as string;
   const customerName = params.customerName as string;
   const customerContact = params.customerContact as string;
-  const deliveryLocation = params.deliveryLocation as string;
-  const deliveryLat = parseFloat(params.deliveryLat as string) || 0;
-  const deliveryLng = parseFloat(params.deliveryLng as string) || 0;
-  const orderMethod = params.orderMethod as string || "delivery";
+  const pickupLocation = params.pickupLocation as string;
+  const pickupLat = parseFloat(params.pickupLat as string) || 0;
+  const pickupLng = parseFloat(params.pickupLng as string) || 0;
+  const specialInstructions = params.specialInstructions as string || "";
 
-  // ✅ ADD THIS: Function to send delivery notifications
-// ✅ FIXED: Function to send delivery notifications with proper customer ID fetching
-// ✅ FIXED: Function to send delivery notifications with proper customer ID fetching
-// ✅ FIXED: Function to send delivery notifications - ONLY for delivered status
-const sendDeliveryNotification = async (status: DeliveryStatus) => {
+  // ✅ FIXED: Function to send pickup notifications (ONLY for collected and delivered_to_shop)
+const sendPickupNotification = async (status: PickupStatus) => {
   try {
-    addDebugLog(`Starting notification for status: ${status}`);
-    
-    // ONLY send notification for delivered status
-    if (status !== "delivered") {
-      addDebugLog(`Skipping notification for status: ${status}`);
+    // Only send notifications for specific statuses
+    if (status !== "collected" && status !== "delivered_to_shop") {
+      addDebugLog(`Skipping notification for status: ${status} - only sending for collected/delivered_to_shop`);
       return;
     }
+
+    addDebugLog(`Starting pickup notification for status: ${status}`);
     
     // 1. Get customer ID from the database using order ID
     const { data: order, error } = await supabase
@@ -957,19 +964,30 @@ const sendDeliveryNotification = async (status: DeliveryStatus) => {
 
     let notificationData;
 
-    // ONLY handle delivered status now
     switch (status) {
-      case "delivered":
+      case "collected":
         notificationData = {
-          title: orderMethod === "pickup" ? "✅ Laundry Returned!" : "🎉 Delivery Completed!",
-          body: orderMethod === "pickup" 
-            ? "Your laundry has been successfully returned to you. Thank you for using our service!" 
-            : "Your order has been delivered. Thank you for your business!",
+          title: "✅ Laundry Collected!",
+          body: "Your laundry has been collected and is on its way to the shop for processing",
           payload: {
             orderId: orderId,
-            deliveryId: deliveryId,
-            status: 'delivered',
-            orderMethod: orderMethod,
+            pickupId: pickupId,
+            status: 'collected',
+            type: 'pickup',
+            timestamp: new Date().toISOString()
+          }
+        };
+        break;
+        
+      case "delivered_to_shop":
+        notificationData = {
+          title: "🏪 Laundry at Shop!",
+          body: "Your laundry has arrived at our shop and processing will begin soon",
+          payload: {
+            orderId: orderId,
+            pickupId: pickupId,
+            status: 'delivered_to_shop',
+            type: 'pickup',
             timestamp: new Date().toISOString()
           }
         };
@@ -991,9 +1009,9 @@ const sendDeliveryNotification = async (status: DeliveryStatus) => {
     
   } catch (error) {
     addDebugLog(`Notification error: ${error instanceof Error ? error.message : String(error)}`);
+    // Don't show alert for notification errors - they shouldn't block the main flow
   }
 };
-  
   // Add debug log
   const addDebugLog = useCallback((message: string) => {
     const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
@@ -1011,16 +1029,6 @@ const sendDeliveryNotification = async (status: DeliveryStatus) => {
 
     return () => unsubscribe();
   }, []);
-
-
-   const {
-    currentLocation: hookCurrentLocation,
-    isTracking,
-    startLocationTracking,
-    stopLocationTracking,
-    updateDriverLocation,
-    locationError: hookLocationError,
-  } = useDriverLocation();
 
   // App state monitoring for battery optimization
   useEffect(() => {
@@ -1059,20 +1067,20 @@ const sendDeliveryNotification = async (status: DeliveryStatus) => {
     }
   }, [showNavigation, fadeAnim]);
 
-  // Check if user has arrived at destination
+  // Check if user has arrived at pickup location
   useEffect(() => {
-    if (currentLocation && deliveryLat && deliveryLng) {
-      const distanceToDestination = calculateDistance(
+    if (currentLocation && pickupLat && pickupLng) {
+      const distanceToPickup = calculateDistance(
         currentLocation.lat,
         currentLocation.lng,
-        deliveryLat,
-        deliveryLng
+        pickupLat,
+        pickupLng
       );
       
-      if (distanceToDestination <= 50 && !hasArrived) {
+      if (distanceToPickup <= 50 && !hasArrived) {
         setHasArrived(true);
-        addDebugLog(`Arrived at destination! Distance: ${distanceToDestination.toFixed(1)}m`);
-      } else if (distanceToDestination > 50 && hasArrived) {
+        addDebugLog(`Arrived at pickup location! Distance: ${distanceToPickup.toFixed(1)}m`);
+      } else if (distanceToPickup > 50 && hasArrived) {
         setHasArrived(false);
       }
 
@@ -1080,18 +1088,18 @@ const sendDeliveryNotification = async (status: DeliveryStatus) => {
       const isMoving = currentLocation.speed && currentLocation.speed > 2;
       setIsSignificantlyMoving(!!isMoving);
     }
-  }, [currentLocation, deliveryLat, deliveryLng]);
+  }, [currentLocation, pickupLat, pickupLng]);
 
   // Memoize map HTML to prevent re-renders
   const mapHTML = React.useMemo(() => {
-    addDebugLog(`Creating PREVIEW map HTML for ${customerName}`);
-    return getMapHTML(deliveryLat, deliveryLng, customerName, false);
-  }, [deliveryLat, deliveryLng, customerName]);
+    addDebugLog(`Creating PREVIEW pickup map HTML for ${customerName}`);
+    return getMapHTML(pickupLat, pickupLng, customerName, false);
+  }, [pickupLat, pickupLng, customerName]);
 
   const fullMapHTML = React.useMemo(() => {
-    addDebugLog(`Creating FULLSCREEN map HTML for ${customerName}`);
-    return getMapHTML(deliveryLat, deliveryLng, customerName, true);
-  }, [deliveryLat, deliveryLng, customerName]);
+    addDebugLog(`Creating FULLSCREEN pickup map HTML for ${customerName}`);
+    return getMapHTML(pickupLat, pickupLng, customerName, true);
+  }, [pickupLat, pickupLng, customerName]);
 
   // Function to reload WebViews if they go white
   const reloadWebViews = useCallback(() => {
@@ -1106,15 +1114,15 @@ const sendDeliveryNotification = async (status: DeliveryStatus) => {
     addDebugLog(`WebView Error: ${nativeEvent.description || 'Unknown error'}`);
   }, []);
 
-  // FIXED: Fetch delivery status with proper status handling
-  const fetchDeliveryStatus = useCallback(async () => {
-    addDebugLog('Fetching delivery status...');
+  // Fetch pickup status
+  const fetchPickupStatus = useCallback(async () => {
+    addDebugLog('Fetching pickup status...');
     
     // Try cached data first
-    const cachedData = await getCachedDeliveryData(deliveryId);
+    const cachedData = await getCachedPickupData(pickupId);
     if (cachedData && !isOnline) {
-      addDebugLog('Using cached delivery data (offline mode)');
-      setDeliveryStatus(cachedData.status);
+      addDebugLog('Using cached pickup data (offline mode)');
+      setPickupStatus(cachedData.status);
       return;
     }
 
@@ -1122,7 +1130,7 @@ const sendDeliveryNotification = async (status: DeliveryStatus) => {
       const { data, error } = await supabase
         .from("deliveries")
         .select("status")
-        .eq("id", deliveryId)
+        .eq("id", pickupId)
         .single();
 
       if (error) {
@@ -1131,203 +1139,95 @@ const sendDeliveryNotification = async (status: DeliveryStatus) => {
       }
 
       if (data && data.status) {
-        // FIXED: Handle out_for_delivery status
-        const validStatus: DeliveryStatus = data.status === "out_for_delivery" || data.status === "delivered" 
-          ? data.status 
-          : "out_for_delivery";
-        
-        setDeliveryStatus(validStatus);
-        await cacheDeliveryData(deliveryId, { status: validStatus });
-        addDebugLog(`Delivery status: ${validStatus}`);
+        setPickupStatus(data.status as PickupStatus);
+        await cachePickupData(pickupId, { status: data.status });
+        addDebugLog(`Pickup status: ${data.status}`);
       }
     } catch (error) {
-      addDebugLog(`Error fetching delivery status: ${error}`);
-      const cachedData = await getCachedDeliveryData(deliveryId);
+      addDebugLog(`Error fetching pickup status: ${error}`);
+      const cachedData = await getCachedPickupData(pickupId);
       if (cachedData) {
-        setDeliveryStatus(cachedData.status);
+        setPickupStatus(cachedData.status);
       }
     }
-  }, [deliveryId, isOnline]);
-  
-  // 🔥 FIXED: COMPLETE CLEANUP FUNCTION - ARCHIVE TO ORDER_HISTORY AND DELETE FROM ALL TABLES
-  const updateDeliveryStatus = async (newStatus: DeliveryStatus) => {
-    addDebugLog(`Updating status to: ${newStatus}`);
-    try {
-      setIsUpdating(true);
-      
-      const updateData: any = {
-        status: newStatus,
-      };
+  }, [pickupId, isOnline]);
 
-      // FIXED: Only handle delivered status
-      if (newStatus === "delivered") {
-        updateData.delivered_at = new Date().toISOString();
-      }
+  // Update pickup status
+ const updatePickupStatus = async (newStatus: PickupStatus) => {
+  addDebugLog(`Updating pickup status to: ${newStatus}`);
+  try {
+    setIsUpdating(true);
+    
+    const updateData: any = {
+      status: newStatus,
+    };
 
-      const { error: deliveryError } = await supabase
-        .from("deliveries")
-        .update(updateData)
-        .eq("id", deliveryId);
-
-      if (deliveryError) throw deliveryError;
-
-      // 🔥 COMPLETE CLEANUP: Only when delivery is marked as delivered
-      if (newStatus === "delivered") {
-        addDebugLog('Starting complete cleanup process...');
+    if (newStatus === "collected") {
+      updateData.picked_up_at = new Date().toISOString();
+      // Also update order_item status to 'collected' for shop processing
+      const { error: orderItemError } = await supabase
+        .from('order_items')
+        .update({ status: 'collected' })
+        .eq('order_id', orderId);
         
-        // 1. Get the order_id from the delivery record
-        const { data: deliveryData, error: fetchError } = await supabase
-          .from("deliveries")
-          .select("order_id")
-          .eq("id", deliveryId)
-          .single();
-
-        if (fetchError) {
-          addDebugLog(`Error fetching delivery order_id: ${fetchError.message}`);
-          throw new Error(`Failed to fetch order details: ${fetchError.message}`);
-        }
-
-        if (deliveryData?.order_id) {
-          const orderId = deliveryData.order_id;
-          addDebugLog(`Found order_id: ${orderId} for cleanup`);
-          
-          // 2. Get complete order and order_items data for order_history
-          const { data: orderData, error: orderFetchError } = await supabase
-            .from("orders")
-            .select(`
-              *,
-              order_items(*),
-              branch:shop_branches(shop_id, name, address),
-              method:shop_methods(code, label),
-              service:shop_services(name, price_per_kg),
-              detergent:detergent_types(name),
-              softener:softener_types(name)
-            `)
-            .eq("id", orderId)
-            .single();
-
-          if (orderFetchError) {
-            addDebugLog(`Error fetching order data: ${orderFetchError.message}`);
-            throw new Error(`Failed to fetch order data: ${orderFetchError.message}`);
-          }
-
-          if (orderData) {
-            addDebugLog('Order data fetched successfully, preparing for order_history insertion');
-            
-            // 3. Insert into order_history with complete data
-            const orderItem = orderData.order_items?.[0];
-            const historyData = {
-            shop_id: orderData.branch?.shop_id || '00000000-0000-0000-0000-000000000000', // ✅ Default UUID
-            branch_id: orderData.branch_id || '00000000-0000-0000-0000-000000000000', // ✅ Default UUID
-              customer_name: orderData.customer_name || 'Customer',
-              customer_contact: orderData.customer_contact || null,
-              delivery_location: orderData.delivery_location || null,
-              method_id: orderData.method_id || null,
-              method_code: orderData.method?.code || null,
-              method_label: orderData.method?.label || null,
-              service_name: orderData.service?.name || 'Standard Service',
-              detergent_name: orderData.detergent?.name || null,
-              softener_name: orderData.softener?.name || null,
-              weight: orderItem?.quantity || 0,
-              price: orderItem?.subtotal || 0,
-              status: 'completed',
-              completed_at: new Date().toISOString(),
-              created_at: orderData.created_at || new Date().toISOString(),
-              customer_id: orderData.customer_id || null
-            };
-
-            addDebugLog('Inserting into order_history...');
-            const { data: historyRecord, error: historyError } = await supabase
-              .from("order_history")
-              .insert(historyData)
-              .select()
-              .single();
-
-            if (historyError) {
-              addDebugLog(`Error inserting into order_history: ${historyError.message}`);
-              throw new Error(`Failed to save order to history: ${historyError.message}`);
-            }
-
-            addDebugLog(`✅ Successfully inserted into order_history: ${historyRecord.id}`);
-
-            // 4. Delete from order_items (work queue)
-            addDebugLog('Deleting from order_items...');
-            const { error: orderItemsDeleteError } = await supabase
-              .from("order_items")
-              .delete()
-              .eq("order_id", orderId);
-
-            if (orderItemsDeleteError) {
-              addDebugLog(`Error deleting from order_items: ${orderItemsDeleteError.message}`);
-              // Don't throw error here - continue with cleanup
-            } else {
-              addDebugLog('✅ Successfully deleted from order_items');
-            }
-
-            // 5. Delete from orders (inbox)
-            addDebugLog('Deleting from orders...');
-            const { error: ordersDeleteError } = await supabase
-              .from("orders")
-              .delete()
-              .eq("id", orderId);
-
-            if (ordersDeleteError) {
-              addDebugLog(`Error deleting from orders: ${ordersDeleteError.message}`);
-              // Don't throw error here - continue with cleanup
-            } else {
-              addDebugLog('✅ Successfully deleted from orders');
-            }
-
-            // 6. Delete from deliveries (delivery tracking)
-            addDebugLog('Deleting from deliveries...');
-            const { error: deliveriesDeleteError } = await supabase
-              .from("deliveries")
-              .delete()
-              .eq("id", deliveryId);
-
-            if (deliveriesDeleteError) {
-              addDebugLog(`Error deleting from deliveries: ${deliveriesDeleteError.message}`);
-              // Don't throw error here - main cleanup is done
-            } else {
-              addDebugLog('✅ Successfully deleted from deliveries');
-            }
-
-            addDebugLog('🎉 COMPLETE CLEANUP FINISHED - Order archived to history and cleaned from all tables');
-          } else {
-            addDebugLog('❌ No order data found for cleanup');
-            throw new Error('No order data found for cleanup');
-          }
-        } else {
-          addDebugLog('❌ No order_id found in delivery record');
-          throw new Error('No order ID found in delivery record');
-        }
+      if (orderItemError) {
+        addDebugLog(`Order item update error: ${orderItemError.message}`);
       }
-
-      setDeliveryStatus(newStatus);
-
-      await sendDeliveryNotification(newStatus);
+    } else if (newStatus === "delivered_to_shop") {
+      updateData.delivered_at = new Date().toISOString();
+      const { error: historyError } = await supabase
+      .from("pickup_history")
+      .update({
+        delivered_to_shop_at: new Date().toISOString(),
+        status: 'collected'
+      })
+      .eq("delivery_id", pickupId)
+      // ✅ ADD DELETION LOGIC HERE
+      addDebugLog('Deleting delivery record to free up order for future deliveries');
       
-      // FIXED: Status messages
-      const statusMessages: Record<DeliveryStatus, string> = {
-        out_for_delivery: "Delivery tracking started!",
-        delivered: "Delivery completed successfully! Order archived to history."
-      };
-      
-      Alert.alert("Success", statusMessages[newStatus]);
-
-      if (newStatus === "delivered") {
-        setTimeout(() => {
-          router.push("/(tabs)/deliveries");
-        }, 2000);
+      const { error: deleteError } = await supabase
+        .from("deliveries")
+        .delete()
+        .eq("id", pickupId);
+        
+      if (deleteError) {
+        addDebugLog(`Delivery deletion error: ${deleteError.message}`);
+        // Don't throw error here - we still want to update the status
+      } else {
+        addDebugLog('✅ Delivery record deleted successfully');
       }
-
-    } catch (error: any) {
-      addDebugLog(`Status update error: ${error.message}`);
-      Alert.alert("Error", error.message || "Failed to update delivery status");
-    } finally {
-      setIsUpdating(false);
     }
-  };
+
+    const { error } = await supabase
+      .from("deliveries")
+      .update(updateData)
+      .eq("id", pickupId);
+
+    if (error) throw error;
+
+    setPickupStatus(newStatus);
+    await sendPickupNotification(newStatus);
+    const statusMessages: Record<PickupStatus, string> = {
+      in_progress: "Pickup tracking started!",
+      collected: "Laundry collected successfully! Heading to shop...",
+      delivered_to_shop: "Laundry delivered to shop! Pickup completed!"
+    };
+    
+    Alert.alert("Success", statusMessages[newStatus]);
+
+    if (newStatus === "delivered_to_shop") {
+      setTimeout(() => {
+        router.push("/(tabs)/pickups");
+      }, 2000);
+    }
+
+  } catch (error: any) {
+    addDebugLog(`Status update error: ${error.message}`);
+    Alert.alert("Error", error.message || "Failed to update pickup status");
+  } finally {
+    setIsUpdating(false);
+  }
+};
 
   // Send location update to WebView
   const sendLocationToWebView = useCallback((coords: LocationCoords, isFullMap: boolean = false) => {
@@ -1355,140 +1255,129 @@ const sendDeliveryNotification = async (status: DeliveryStatus) => {
   }, [anyMapReady]);
 
   // Enhanced Location tracking with battery optimization
-// Enhanced Location tracking with battery optimization
-useEffect(() => {
-  let locationSubscription: Location.LocationSubscription | null = null;
-  let lastRoutingUpdate = 0;
-  let isMounted = true;
+  useEffect(() => {
+    let locationSubscription: Location.LocationSubscription | null = null;
+    let lastRoutingUpdate = 0;
+    let isMounted = true;
 
-  const setupLocation = async () => {
-    if (!isMounted) return;
-
-    addDebugLog('Setting up location tracking...');
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        setLocationError('Location permission denied');
-        Alert.alert("Permission Required", "Location permission is needed for delivery tracking");
-        return;
-      }
-
-      setLocationError(null);
-      addDebugLog('Location permission granted');
-      
-      const current = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      
-      const coords: LocationCoords = {
-        lat: current.coords.latitude,
-        lng: current.coords.longitude,
-        accuracy: current.coords.accuracy,
-        altitude: current.coords.altitude,
-        heading: current.coords.heading,
-        speed: current.coords.speed,
-      };
-      
-      setCurrentLocation(coords);
-      addDebugLog(`Initial location: ${coords.lat}, ${coords.lng} (accuracy: ${getAccuracyDisplay(coords.accuracy)})`);
-
-      // ✅ ADD THIS: Update database with initial location
-      if (deliveryId) {
-        await updateDriverLocation(deliveryId, coords.lat, coords.lng);
-      }
-
-      const sendInitialLocation = () => {
-        addDebugLog('Sending initial location to WebViews');
-        sendLocationToWebView(coords, false);
-        sendLocationToWebView(coords, true);
-      };
-
-      sendInitialLocation();
-      lastRoutingUpdate = Date.now();
-      
-      // Adaptive location tracking based on movement
-      const config = isSignificantlyMoving ? {
-        accuracy: Location.Accuracy.Balanced,
-        timeInterval: 10000,
-        distanceInterval: 10,
-      } : {
-        accuracy: Location.Accuracy.Lowest,
-        timeInterval: 30000,
-        distanceInterval: 50,
-      };
-      
-      locationSubscription = await Location.watchPositionAsync(
-        config,
-        (location) => {
-          if (!isMounted) return;
-
-          const newCoords: LocationCoords = {
-            lat: location.coords.latitude,
-            lng: location.coords.longitude,
-            accuracy: location.coords.accuracy,
-            altitude: location.coords.altitude,
-            heading: location.coords.heading,
-            speed: location.coords.speed,
-          };
-          
-          if (!isLocationAccurate(newCoords.accuracy)) {
-            addDebugLog(`Ignoring inaccurate location: ${getAccuracyDisplay(newCoords.accuracy)} accuracy`);
-            return;
-          }
-          
-          const now = Date.now();
-          const timeSinceLastUpdate = now - lastRoutingUpdate;
-          const distanceMoved = currentLocation ? 
-            calculateDistance(
-              currentLocation.lat, 
-              currentLocation.lng, 
-              newCoords.lat, 
-              newCoords.lng
-            ) : 0;
-          
-          setCurrentLocation(newCoords);
-          addDebugLog(`Location update: ${newCoords.lat}, ${newCoords.lng} (accuracy: ${getAccuracyDisplay(newCoords.accuracy)}, moved: ${distanceMoved.toFixed(2)}m, timeSinceLastUpdate: ${timeSinceLastUpdate / 1000}s)`);
-          
-          // ✅ ADD THIS: Update database when location changes
-          if (deliveryId && (distanceMoved > 10 || timeSinceLastUpdate > 30000)) {
-            updateDriverLocation(deliveryId, newCoords.lat, newCoords.lng);
-          }
-          
-          if (distanceMoved > 10 || timeSinceLastUpdate > 30000) {
-            sendLocationToWebView(newCoords, false);
-            sendLocationToWebView(newCoords, true);
-            lastRoutingUpdate = now;
-          } else {
-            addDebugLog(`Skipping location send - minimal movement: ${distanceMoved.toFixed(1)}m`);
-          }
-        }
-      );
-      
-      addDebugLog('Location watcher started');
-    } catch (error) {
+    const setupLocation = async () => {
       if (!isMounted) return;
-      addDebugLog(`Location error: ${error}`);
-      setLocationError(`Location error: ${error}`);
-      Alert.alert("Location Error", "Unable to access your location");
-    }
-  };
 
-  setupLocation();
+      addDebugLog('Setting up location tracking for pickup...');
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") {
+          setLocationError('Location permission denied');
+          Alert.alert("Permission Required", "Location permission is needed for pickup tracking");
+          return;
+        }
 
-  return () => {
-    isMounted = false;
-    if (locationSubscription) {
-      locationSubscription.remove();
-      addDebugLog('Location watcher stopped');
-    }
-  };
-}, [sendLocationToWebView, isSignificantlyMoving, deliveryId]); // ✅ Add deliveryId to dependencies
+        setLocationError(null);
+        addDebugLog('Location permission granted');
+        
+        const current = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        
+        const coords: LocationCoords = {
+          lat: current.coords.latitude,
+          lng: current.coords.longitude,
+          accuracy: current.coords.accuracy,
+          altitude: current.coords.altitude,
+          heading: current.coords.heading,
+          speed: current.coords.speed,
+        };
+        
+        setCurrentLocation(coords);
+        addDebugLog(`Initial location: ${coords.lat}, ${coords.lng} (accuracy: ${getAccuracyDisplay(coords.accuracy)})`);
+
+        const sendInitialLocation = () => {
+          addDebugLog('Sending initial location to WebViews');
+          sendLocationToWebView(coords, false);
+          sendLocationToWebView(coords, true);
+        };
+
+        sendInitialLocation();
+        lastRoutingUpdate = Date.now();
+        
+        // Adaptive location tracking based on movement
+        const config = isSignificantlyMoving ? {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 10000,
+          distanceInterval: 10,
+        } : {
+          accuracy: Location.Accuracy.Lowest,
+          timeInterval: 30000,
+          distanceInterval: 50,
+        };
+        
+        locationSubscription = await Location.watchPositionAsync(
+          config,
+          (location) => {
+            if (!isMounted) return;
+
+            const newCoords: LocationCoords = {
+              lat: location.coords.latitude,
+              lng: location.coords.longitude,
+              accuracy: location.coords.accuracy,
+              altitude: location.coords.altitude,
+              heading: location.coords.heading,
+              speed: location.coords.speed,
+            };
+            
+            if (!isLocationAccurate(newCoords.accuracy)) {
+              addDebugLog(`Ignoring inaccurate location: ${getAccuracyDisplay(newCoords.accuracy)} accuracy`);
+              return;
+            }
+            
+            const now = Date.now();
+            const timeSinceLastUpdate = now - lastRoutingUpdate;
+            const distanceMoved = currentLocation ? 
+              calculateDistance(
+                currentLocation.lat, 
+                currentLocation.lng, 
+                newCoords.lat, 
+                newCoords.lng
+              ) : 0;
+            
+            setCurrentLocation(newCoords);
+            addDebugLog(`Location update: ${newCoords.lat}, ${newCoords.lng} (accuracy: ${getAccuracyDisplay(newCoords.accuracy)}, moved: ${distanceMoved.toFixed(2)}m, timeSinceLastUpdate: ${timeSinceLastUpdate / 1000}s)`);
+            
+            if (distanceMoved > 10 || timeSinceLastUpdate > 30000) {
+              sendLocationToWebView(newCoords, false);
+              sendLocationToWebView(newCoords, true);
+              lastRoutingUpdate = now;
+            } else {
+              addDebugLog(`Skipping location send - minimal movement: ${distanceMoved.toFixed(1)}m`);
+            }
+          }
+        );
+        
+        addDebugLog('Location watcher started');
+      } catch (error) {
+        if (!isMounted) return;
+        addDebugLog(`Location error: ${error}`);
+        setLocationError(`Location error: ${error}`);
+        Alert.alert("Location Error", "Unable to access your location");
+      }
+    };
+
+    setupLocation();
+
+    return () => {
+      isMounted = false;
+      if (locationSubscription) {
+        locationSubscription.remove();
+        addDebugLog('Location watcher stopped');
+      }
+    };
+  }, [sendLocationToWebView, isSignificantlyMoving]);
 
   // Initial data fetch
   useEffect(() => {
-    addDebugLog('Component mounted - fetching initial data');
-    fetchDeliveryStatus();
-  }, [fetchDeliveryStatus]);
+    addDebugLog('Pickup component mounted - fetching initial data');
+    fetchPickupStatus();
+  }, [fetchPickupStatus]);
 
   // Handle WebView messages
   const handleWebViewMessage = useCallback((event: any) => {
@@ -1513,7 +1402,7 @@ useEffect(() => {
           }
           break;
         case 'route_calculated':
-          addDebugLog(`Route calculated: ${data.distance} km, ${data.time} min ${data.recalculated ? '(RECALCULATED)' : ''}`);
+          addDebugLog(`Route to PICKUP calculated: ${data.distance} km, ${data.time} min ${data.recalculated ? '(RECALCULATED)' : ''}`);
           setDistance(data.distance + ' km');
           setEta(data.time + ' min');
           
@@ -1558,40 +1447,9 @@ useEffect(() => {
   // MEMORY LEAK FIX: Cleanup WebViews on unmount
   useEffect(() => {
     return () => {
-      addDebugLog('Component unmounting - cleaning up WebViews');
+      addDebugLog('Pickup component unmounting - cleaning up WebViews');
     };
   }, []);
-
-  // FIXED: Status configuration - handle out_for_delivery
-  const statusConfig = {
-    out_for_delivery: {
-      title: orderMethod === "pickup" ? "Return Delivery in Progress" : "Delivery in Progress",
-      icon: "navigate" as IoniconsName,
-      color: "#007AFF",
-      nextAction: orderMethod === "pickup" ? "Mark Return Completed" : "Mark as Delivered",
-      nextStatus: "delivered" as DeliveryStatus,
-      description: orderMethod === "pickup" 
-        ? "Returning completed laundry to customer" 
-        : "Real-time location tracking enabled"
-    },
-    delivered: {
-      title: "Delivery Completed",
-      icon: "checkmark-done" as IoniconsName,
-      color: "#34C759",
-      nextAction: "Completed",
-      nextStatus: "delivered" as DeliveryStatus,
-      description: orderMethod === "pickup" 
-        ? "Laundry successfully returned to customer" 
-        : "Delivery has been successfully completed"
-    }
-  };
-
-  // FIXED: Safe status getter with fallback
-  const getCurrentStatus = (status: DeliveryStatus) => {
-    return statusConfig[status] || statusConfig.out_for_delivery;
-  };
-
-  const currentStatus = getCurrentStatus(deliveryStatus);
 
   // Navigation Panel Component - ONLY FOR FULL SCREEN MAP
   const NavigationPanel = () => {
@@ -1625,7 +1483,7 @@ useEffect(() => {
       <Animated.View style={[styles.arrivalPanel, { opacity: fadeAnim }]}>
         <View style={styles.arrivalInstruction}>
           <Ionicons name="flag" size={28} color="white" style={styles.arrivalIcon} />
-          <Text style={styles.arrivalText}>You have arrived at your destination</Text>
+          <Text style={styles.arrivalText}>You have arrived at pickup location</Text>
         </View>
       </Animated.View>
     );
@@ -1637,7 +1495,7 @@ useEffect(() => {
 
     return (
       <View style={styles.recalculatingOverlay}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color="#FF6B35" />
         <Text style={styles.recalculatingText}>Recalculating route...</Text>
       </View>
     );
@@ -1660,13 +1518,12 @@ useEffect(() => {
   // Debug panel component
   const DebugPanel = () => (
     <View style={styles.debugPanel}>
-      <Text style={styles.debugTitle}>Delivery Status</Text>
+      <Text style={styles.debugTitle}>Pickup Status</Text>
       <StatusIndicator />
       <Text>Location: {currentLocation ? `${currentLocation.lat.toFixed(6)}, ${currentLocation.lng.toFixed(6)}` : 'None'}</Text>
       <Text>Accuracy: {getAccuracyDisplay(currentLocation?.accuracy)}</Text>
       <Text>Map Ready: {anyMapReady ? '✅' : '❌'}</Text>
-      <Text>Status: {deliveryStatus}</Text>
-      <Text>Type: {orderMethod === "pickup" ? "🔄 PICKUP RETURN" : "📦 DELIVERY"}</Text>
+      <Text>Status: {pickupStatus}</Text>
       <Text>Distance: {distance}</Text>
       <Text>ETA: {eta}</Text>
       <Text>Next Turn: {nextInstruction ? `${nextInstruction.text} in ${formatDistance(nextInstruction.distance)}` : 'None'}</Text>
@@ -1685,29 +1542,58 @@ useEffect(() => {
     </View>
   );
 
+  // Status configuration for PICKUP - WITH NULL SAFETY
+  const statusConfig = {
+    in_progress: {
+      title: "Driver On The Way! 🚗",
+      icon: "car" as IoniconsName,
+      color: "#FF6B35",
+      nextAction: "I've Arrived - Collect Laundry",
+      nextStatus: "collected" as PickupStatus,
+      description: "Driver is en route to pickup location"
+    },
+    collected: {
+      title: "Laundry Collected ✅",
+      icon: "bag-check" as IoniconsName,
+      color: "#34C759",
+      nextAction: "Delivered to Shop",
+      nextStatus: "delivered_to_shop" as PickupStatus,
+      description: "Laundry collected - heading to shop for processing"
+    },
+    delivered_to_shop: {
+      title: "Pickup Completed 🎉",
+      icon: "checkmark-done" as IoniconsName,
+      color: "#34C759",
+      nextAction: "Back to Pickups",
+      nextStatus: "delivered_to_shop" as PickupStatus,
+      description: "Laundry delivered to shop - pickup completed"
+    }
+  };
+
+  // SAFE ACCESS with fallback - FIX FOR THE ERROR
+  const currentStatus = statusConfig[pickupStatus] || statusConfig.in_progress;
+
   if (!currentLocation && !locationError) {
     return (
       <SafeAreaView style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
-        <ActivityIndicator size="large" color="#3864C3" />
-        <Text style={{ marginTop: 10, color: "#3864C3" }}>Getting your location...</Text>
+        <ActivityIndicator size="large" color="#FF6B35" />
+        <Text style={{ marginTop: 10, color: "#FF6B35" }}>Getting your location...</Text>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
+      {/* Header - ORANGE THEME */}
       <View style={styles.headerBox}>
         <Svg width="100%" height={verticalScale(90)} viewBox="0 0 1440 320" style={styles.waveTop}>
-          <Path fill="#3864C3" d="M0,64 C720,-32 720,160 1440,64 L1440,0 L0,0 Z" />
+          <Path fill="#FF6B35" d="M0,64 C720,-32 720,160 1440,64 L1440,0 L0,0 Z" />
         </Svg>
         <View style={styles.headerContent}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="white" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>
-            {orderMethod === "pickup" ? "RETURN DELIVERY" : "DELIVERY TRACKING"}
-          </Text>
+          <Text style={styles.headerTitle}>PICKUP TRACKING</Text>
           <View style={{ width: 24 }} />
         </View>
       </View>
@@ -1716,7 +1602,7 @@ useEffect(() => {
         {/* Debug Panel */}
         <DebugPanel />
 
-        {/* Status Card */}
+        {/* Status Card - WITH NULL SAFETY */}
         <View style={[styles.statusCard, { borderLeftColor: currentStatus.color }]}>
           <View style={styles.statusHeader}>
             <Ionicons name={currentStatus.icon} size={24} color={currentStatus.color} />
@@ -1768,7 +1654,7 @@ useEffect(() => {
               }}
               renderLoading={() => (
                 <View style={styles.mapLoading}>
-                  <ActivityIndicator size="large" color="#3864C3" />
+                  <ActivityIndicator size="large" color="#FF6B35" />
                   <Text style={styles.loadingText}>Loading map...</Text>
                 </View>
               )}
@@ -1795,27 +1681,36 @@ useEffect(() => {
           </View>
         </View>
 
-        {/* Delivery Address */}
+        {/* Special Instructions */}
+        {specialInstructions && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Special Instructions</Text>
+            <View style={styles.detailRow}>
+              <Ionicons name="information-circle" size={18} color="#FF6B35" />
+              <Text style={[styles.detailText, { color: '#FF6B35' }]}>{specialInstructions}</Text>
+            </View>
+          </View>
+        )}
+
+        {/* Pickup Address */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            {orderMethod === "pickup" ? "Return Address" : "Delivery Address"}
-          </Text>
+          <Text style={styles.sectionTitle}>Pickup Address</Text>
           <View style={styles.detailRow}>
             <Ionicons name="location" size={18} color="#666" />
-            <Text style={styles.detailText}>{deliveryLocation}</Text>
+            <Text style={styles.detailText}>{pickupLocation}</Text>
           </View>
         </View>
 
-        {/* Action Buttons */}
+        {/* Action Buttons - WITH NULL SAFETY */}
         <View style={styles.actionContainer}>
-          {deliveryStatus !== "delivered" && (
+          {currentStatus && pickupStatus !== "delivered_to_shop" && (
             <TouchableOpacity
               style={[
                 styles.actionButton,
                 { backgroundColor: currentStatus.color },
                 isUpdating && styles.buttonDisabled
               ]}
-              onPress={() => updateDeliveryStatus(currentStatus.nextStatus)}
+              onPress={() => updatePickupStatus(currentStatus.nextStatus)}
               disabled={isUpdating}
             >
               {isUpdating ? (
@@ -1829,13 +1724,13 @@ useEffect(() => {
             </TouchableOpacity>
           )}
 
-          {deliveryStatus === "delivered" && (
+          {pickupStatus === "delivered_to_shop" && (
             <TouchableOpacity
-              style={[styles.actionButton, { backgroundColor: "#3864C3" }]}
-              onPress={() => router.push("/(tabs)/deliveries")}
+              style={[styles.actionButton, { backgroundColor: "#FF6B35" }]}
+              onPress={() => router.push("/(tabs)/pickups")}
             >
               <Ionicons name="list" size={20} color="white" />
-              <Text style={styles.actionButtonText}>BACK TO DELIVERIES</Text>
+              <Text style={styles.actionButtonText}>BACK TO PICKUPS</Text>
             </TouchableOpacity>
           )}
 
@@ -1863,7 +1758,7 @@ useEffect(() => {
               ]);
             }}
           >
-            <Ionicons name="call" size={18} color="#3864C3" />
+            <Ionicons name="call" size={18} color="#FF6B35" />
             <Text style={styles.secondaryButtonText}>CALL CUSTOMER</Text>
           </TouchableOpacity>
         </View>
@@ -1884,9 +1779,7 @@ useEffect(() => {
             >
               <Ionicons name="close" size={24} color="white" />
             </TouchableOpacity>
-            <Text style={styles.fullScreenTitle}>
-              {orderMethod === "pickup" ? "RETURN MAP VIEW" : "DELIVERY MAP VIEW"}
-            </Text>
+            <Text style={styles.fullScreenTitle}>PICKUP MAP VIEW</Text>
             <View style={{ width: 24 }} />
           </View>
           
@@ -1912,7 +1805,7 @@ useEffect(() => {
             }}
             renderLoading={() => (
               <View style={styles.fullScreenLoading}>
-                <ActivityIndicator size="large" color="#3864C3" />
+                <ActivityIndicator size="large" color="#FF6B35" />
                 <Text style={styles.loadingText}>Loading map...</Text>
               </View>
             )}
@@ -1930,7 +1823,6 @@ useEffect(() => {
   );
 }
 
-// Styles remain exactly the same
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1939,7 +1831,7 @@ const styles = StyleSheet.create({
   headerBox: {
     width: "100%",
     height: verticalScale(90),
-    backgroundColor: "#3864C3",
+    backgroundColor: "#FF6B35",
     justifyContent: "center",
     overflow: "hidden",
   },
@@ -2011,7 +1903,7 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
   },
   reloadButton: {
-    backgroundColor: '#3864C3',
+    backgroundColor: '#FF6B35',
     padding: scale(8),
     borderRadius: scale(6),
     marginTop: verticalScale(6),
@@ -2037,13 +1929,13 @@ const styles = StyleSheet.create({
     elevation: 12,
     zIndex: 1000,
     borderWidth: 2,
-    borderColor: '#34C759',
+    borderColor: '#FF6B35',
   },
   nextTurn: {
     padding: scale(20),
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#34C759',
+    backgroundColor: '#FF6B35',
     borderRadius: scale(14),
   },
   nextTurnIcon: {
@@ -2078,13 +1970,13 @@ const styles = StyleSheet.create({
     elevation: 12,
     zIndex: 1000,
     borderWidth: 2,
-    borderColor: '#FF9500',
+    borderColor: '#34C759',
   },
   arrivalInstruction: {
     padding: scale(20),
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FF9500',
+    backgroundColor: '#34C759',
     borderRadius: scale(14),
   },
   arrivalIcon: {
@@ -2253,7 +2145,7 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(10),
   },
   primaryNavButton: {
-    backgroundColor: "#007AFF",
+    backgroundColor: "#FF6B35",
   },
   primaryNavButtonText: {
     color: "white",
@@ -2269,10 +2161,10 @@ const styles = StyleSheet.create({
     gap: scale(8),
     backgroundColor: "#f0f0f0",
     borderWidth: 1,
-    borderColor: "#3864C3",
+    borderColor: "#FF6B35",
   },
   secondaryButtonText: {
-    color: "#3864C3",
+    color: "#FF6B35",
     fontWeight: "bold",
     fontSize: moderateScale(14),
   },
@@ -2289,7 +2181,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: scale(16),
     paddingVertical: verticalScale(10),
-    backgroundColor: '#3864C3',
+    backgroundColor: '#FF6B35',
   },
   fullScreenTitle: {
     fontSize: moderateScale(18),
