@@ -20,6 +20,23 @@ import { moderateScale, scale, verticalScale } from "react-native-size-matters";
 import { WebView } from "react-native-webview";
 import { AppHeader } from "../component/AppHeader";
 
+// Secure logging utility
+const secureLog = {
+  debug: (message: string, data?: any) => {
+    if (__DEV__) {
+      console.log(`[DEBUG] ${message}`, data);
+    }
+  },
+  error: (message: string, error?: any) => {
+    console.error(`[ERROR] ${message}`, error?.message || error);
+  },
+  warn: (message: string, data?: any) => {
+    if (__DEV__) {
+      console.warn(`[WARN] ${message}`, data);
+    }
+  }
+};
+
 type Pickup = {
   order_item_id: string;
   order_item_status: string;
@@ -41,7 +58,17 @@ type Pickup = {
   special_instructions?: string;
   order_method?: string;
   order_method_label?: string;
+  shop_name?: string;
 };
+
+interface BranchInfo {
+  branchId: string;
+  name: string;
+  address: string;
+  shopName: string;
+  latitude: number;
+  longitude: number;
+}
 
 const webViewCache = new Map<string, string>();
 
@@ -60,7 +87,7 @@ class ErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error("Error Boundary Caught:", error, errorInfo);
+    secureLog.error("Error Boundary Caught:", error);
   }
 
   render() {
@@ -202,7 +229,7 @@ const MiniMap = ({
                 
               } catch (error) {
                 if (window.ReactNativeWebView) {
-                  window.ReactNativeWebView.postMessage('map_error:' + error.message);
+                  window.ReactNativeWebView.postMessage('map_error');
                 }
               }
             </script>
@@ -258,16 +285,13 @@ const MiniMap = ({
           if (event.nativeEvent.data === 'map_loaded') {
             setIsLoading(false);
           } else if (event.nativeEvent.data.startsWith('map_error')) {
-            console.error('Map error:', event.nativeEvent.data);
             if (isMounted.current) setWebViewError(true);
           }
         }}
         onError={() => {
-          console.log('WebView error');
           if (isMounted.current) setWebViewError(true);
         }}
         onHttpError={() => {
-          console.log('WebView HTTP error');
           if (isMounted.current) setWebViewError(true);
         }}
         renderLoading={() => (
@@ -292,7 +316,6 @@ export default function PickupInfo() {
   const { width, height } = useWindowDimensions();
   const scrollViewRef = useRef<ScrollView>(null);
   
-  // Memory leak prevention
   const isMounted = useRef(true);
   
   const [pickups, setPickups] = useState<Pickup[]>([]);
@@ -302,13 +325,12 @@ export default function PickupInfo() {
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [takingPickupId, setTakingPickupId] = useState<string | null>(null);
   const [driverBranchId, setDriverBranchId] = useState<string | null>(null);
+  const [driverBranchInfo, setDriverBranchInfo] = useState<BranchInfo | null>(null);
   
-  // Authentication states
   const [currentDriverId, setCurrentDriverId] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // Confirmation Modal State
   const [confirmationModal, setConfirmationModal] = useState<{
     visible: boolean;
     orderItemId: string;
@@ -321,7 +343,6 @@ export default function PickupInfo() {
     customerName: "",
   });
 
-  // Get current authenticated user
   const getCurrentUser = useCallback(async () => {
     try {
       if (isMounted.current) {
@@ -340,7 +361,7 @@ export default function PickupInfo() {
       
       return user;
     } catch (error: any) {
-      console.error("Error getting current user:", error);
+      secureLog.error("Error getting current user:", error);
       if (isMounted.current) {
         setAuthError(error.message || "Authentication failed");
       }
@@ -353,25 +374,50 @@ export default function PickupInfo() {
   }, []);
 
   // Get driver's assigned branch
-  const getDriverBranch = useCallback(async (driverId: string) => {
+  const getDriverBranch = useCallback(async (driverId: string): Promise<BranchInfo | null> => {
     try {
       const { data, error } = await supabase
         .from("shop_user_assignments")
-        .select("branch_id")
+        .select(`
+          branch_id,
+          shops (name),
+          shop_branches (name, address, latitude, longitude)
+        `)
         .eq("user_id", driverId)
         .eq("role_in_shop", "delivery")
         .eq("is_active", true)
         .single();
 
-      if (error) throw error;
-      return data?.branch_id;
+      if (error) {
+        secureLog.error("Error fetching driver branch:", error);
+        return null;
+      }
+
+      if (data && data.branch_id) {
+        const branchInfo: BranchInfo = {
+          branchId: data.branch_id,
+          name: data.shop_branches?.name || "Main Branch",
+          address: data.shop_branches?.address || "Address not specified",
+          shopName: data.shops?.name || "Laundry Shop",
+          latitude: data.shop_branches?.latitude || 0,
+          longitude: data.shop_branches?.longitude || 0
+        };
+
+        if (isMounted.current) {
+          setDriverBranchId(data.branch_id);
+          setDriverBranchInfo(branchInfo);
+        }
+
+        return branchInfo;
+      }
+
+      return null;
     } catch (error) {
-      console.error("Error fetching driver branch:", error);
+      secureLog.error("Error fetching driver branch:", error);
       return null;
     }
   }, []);
 
-  // Fetch active pickup for this driver
   const fetchActivePickup = useCallback(async (driverId: string) => {
     try {
       const { data, error } = await supabase
@@ -399,7 +445,7 @@ export default function PickupInfo() {
           )
         `)
         .eq("driver_id", driverId)
-        .in("status", ["assigned", "in_progress"])
+        .in("status", ["out_for_delivery", "in_progress"])
         .order("assigned_at", { ascending: false })
         .limit(1)
         .single();
@@ -418,6 +464,9 @@ export default function PickupInfo() {
         const orderItem = Array.isArray(data.orders?.order_items) ? data.orders.order_items[0] : null;
         const shopMethod = Array.isArray(data.orders?.shop_methods) ? data.orders.shop_methods[0] : null;
         
+        // Get branch info to include in active pickup
+        const branchInfo = await getDriverBranch(driverId);
+        
         const active: Pickup = {
           pickup_id: data.id,
           order_id: data.order_id || "",
@@ -429,66 +478,49 @@ export default function PickupInfo() {
           pickup_latitude: data.orders?.delivery_latitude || 0,
           pickup_longitude: data.orders?.delivery_longitude || 0,
           estimated_weight: "To be weighed at shop",
-          branch_name: "",
-          branch_address: "",
-          branch_lat: 0,
-          branch_lng: 0,
+          branch_name: branchInfo?.name || "",
+          branch_address: branchInfo?.address || "",
+          branch_lat: branchInfo?.latitude || 0,
+          branch_lng: branchInfo?.longitude || 0,
           driver_id: driverId,
           pickup_status: data.status,
           requested_at: orderItem?.started_at || new Date().toISOString(),
           order_method: shopMethod?.code || "pickup",
           order_method_label: shopMethod?.label || "Pickup",
+          shop_name: branchInfo?.shopName || ""
         };
         setActivePickup(active);
       } else if (isMounted.current) {
         setActivePickup(null);
       }
     } catch (error) {
-      console.error("Error fetching active pickup:", error);
+      secureLog.error("Error fetching active pickup:", error);
       if (isMounted.current) {
         setActivePickup(null);
       }
     }
-  }, []);
+  }, [getDriverBranch]);
 
-  // Fetch available pickups
+  // Fixed fetchPickups function with dynamic branch assignment
   const fetchPickups = useCallback(async (driverId: string) => {
     try {
       if (isMounted.current) {
         setLoading(true);
       }
 
-      // First, get the driver's branch with branch details
-      const branchId = await getDriverBranch(driverId);
-      if (!branchId) {
+      // Get driver's branch info
+      const branchInfo = await getDriverBranch(driverId);
+      if (!branchInfo || !branchInfo.branchId) {
         if (isMounted.current) {
-          Alert.alert("Error", "No branch assigned to this driver");
+          Alert.alert("Error", "No branch assigned to this driver. Please contact admin.");
           setPickups([]);
         }
         return;
       }
 
-      if (isMounted.current) {
-        setDriverBranchId(branchId);
-      }
+      secureLog.debug("Driver assigned to:", branchInfo);
 
-      // Get branch details first
-      const { data: branchData, error: branchError } = await supabase
-        .from("shop_branches")
-        .select("name, address, latitude, longitude")
-        .eq("id", branchId)
-        .single();
-
-      if (branchError) {
-        console.error("Error fetching branch details:", branchError);
-      }
-
-      const branchName = branchData?.name || "Main Branch Hangyu Laundry Shop";
-      const branchAddress = branchData?.address || "Santa Rosa Street";
-      const branchLat = branchData?.latitude || 0;
-      const branchLng = branchData?.longitude || 0;
-
-      // Get all order_items that are waiting for pickup and belong to this branch
+      // Fetch pickups for this branch
       const { data: orderItems, error: itemsError } = await supabase
         .from("order_items")
         .select(`
@@ -512,7 +544,7 @@ export default function PickupInfo() {
           )
         `)
         .eq("status", "waiting_for_pickup")
-        .eq("orders.branch_id", branchId)
+        .eq("orders.branch_id", branchInfo.branchId)
         .order("started_at", { ascending: true });
 
       if (itemsError) throw itemsError;
@@ -524,10 +556,8 @@ export default function PickupInfo() {
         return;
       }
 
-      // Get order IDs to check for existing deliveries
       const orderIds = orderItems.map(item => item.order_id).filter(Boolean);
 
-      // Check which orders already have deliveries assigned
       const { data: existingDeliveries, error: deliveriesError } = await supabase
         .from("deliveries")
         .select("order_id, driver_id")
@@ -535,10 +565,9 @@ export default function PickupInfo() {
         .not("driver_id", "is", null);
 
       if (deliveriesError) {
-        console.error("Error checking existing deliveries:", deliveriesError);
+        secureLog.error("Error checking existing deliveries:", deliveriesError);
       }
 
-      // Filter out order items that already have deliveries assigned
       const availableOrderItems = orderItems.filter(item => {
         const hasDelivery = existingDeliveries?.some(delivery => delivery.order_id === item.order_id);
         return !hasDelivery;
@@ -562,39 +591,30 @@ export default function PickupInfo() {
             pickup_latitude: order?.delivery_latitude || 0,
             pickup_longitude: order?.delivery_longitude || 0,
             estimated_weight: "To be weighed at shop",
-            branch_name: branchName,
-            branch_address: branchAddress,
-            branch_lat: branchLat,
-            branch_lng: branchLng,
+            branch_name: branchInfo.name,
+            branch_address: branchInfo.address,
+            branch_lat: branchInfo.latitude,
+            branch_lng: branchInfo.longitude,
             driver_id: null,
             pickup_status: null,
             requested_at: orderItem.started_at || new Date().toISOString(),
             special_instructions: specialInstructions || "",
             order_method: shopMethod?.code || "pickup",
             order_method_label: shopMethod?.label || "Pickup",
+            shop_name: branchInfo.shopName
           };
         });
 
         setPickups(transformedPickups);
       }
     } catch (error: any) {
-      console.error("Error fetching pickups:", error);
+      secureLog.error("Error fetching pickups:", error);
       
-      // Fallback approach
       try {
-        const branchId = await getDriverBranch(driverId);
-        if (!branchId) return;
+        // Fallback: Try a simpler query
+        const branchInfo = await getDriverBranch(driverId);
+        if (!branchInfo || !branchInfo.branchId) return;
 
-        const { data: branchData } = await supabase
-          .from("shop_branches")
-          .select("name, address")
-          .eq("id", branchId)
-          .single();
-
-        const branchName = branchData?.name || "Main Branch Hangyu Laundry Shop";
-        const branchAddress = branchData?.address || "Santa Rosa Street";
-
-        // Simple approach: get orders first, then check for deliveries
         const { data: orders, error: ordersError } = await supabase
           .from("orders")
           .select(`
@@ -610,7 +630,7 @@ export default function PickupInfo() {
               label
             )
           `)
-          .eq("branch_id", branchId);
+          .eq("branch_id", branchInfo.branchId);
 
         if (ordersError) throw ordersError;
 
@@ -621,7 +641,6 @@ export default function PickupInfo() {
           return;
         }
 
-        // Get order items for these orders
         const orderIds = orders.map(order => order.id).filter(Boolean);
         const { data: orderItems, error: itemsError } = await supabase
           .from("order_items")
@@ -639,14 +658,12 @@ export default function PickupInfo() {
           return;
         }
 
-        // Check for existing deliveries
         const { data: existingDeliveries } = await supabase
           .from("deliveries")
           .select("order_id")
           .in("order_id", orderIds)
           .not("driver_id", "is", null);
 
-        // Filter out orders that have deliveries
         const availableOrderItems = orderItems.filter(item => {
           const hasDelivery = existingDeliveries?.some(delivery => delivery.order_id === item.order_id);
           return !hasDelivery;
@@ -669,23 +686,24 @@ export default function PickupInfo() {
               pickup_latitude: order?.delivery_latitude || 0,
               pickup_longitude: order?.delivery_longitude || 0,
               estimated_weight: "To be weighed at shop",
-              branch_name: branchName,
-              branch_address: branchAddress,
-              branch_lat: 0,
-              branch_lng: 0,
+              branch_name: branchInfo.name,
+              branch_address: branchInfo.address,
+              branch_lat: branchInfo.latitude,
+              branch_lng: branchInfo.longitude,
               driver_id: null,
               pickup_status: null,
               requested_at: orderItem.started_at || new Date().toISOString(),
               special_instructions: specialInstructions || "",
               order_method: shopMethod?.code || "pickup",
               order_method_label: shopMethod?.label || "Pickup",
+              shop_name: branchInfo.shopName
             };
           });
 
           setPickups(fallbackPickups);
         }
       } catch (fallbackError: any) {
-        console.error("Fallback error:", fallbackError);
+        secureLog.error("Fallback error:", fallbackError);
         if (isMounted.current) {
           Alert.alert("Error", "Failed to load pickups. Please try again.");
           setPickups([]);
@@ -699,7 +717,6 @@ export default function PickupInfo() {
     }
   }, [getDriverBranch]);
 
-  // Combined fetch function
   const fetchAllData = useCallback(async (driverId: string) => {
     await Promise.all([
       fetchPickups(driverId),
@@ -707,7 +724,6 @@ export default function PickupInfo() {
     ]);
   }, [fetchPickups, fetchActivePickup]);
 
-  // Initialize authentication and data
   const initializeApp = useCallback(async () => {
     try {
       if (isMounted.current) {
@@ -728,7 +744,7 @@ export default function PickupInfo() {
       }
       await fetchAllData(user.id);
     } catch (error: any) {
-      console.error("Error initializing app:", error);
+      secureLog.error("Error initializing app:", error);
       if (isMounted.current) {
         setAuthError(error.message || "Failed to initialize app");
       }
@@ -739,7 +755,6 @@ export default function PickupInfo() {
     }
   }, [getCurrentUser, fetchAllData]);
 
-  // Navigate to map preview screen
   const showMapPreview = (pickup: Pickup) => {
     if (!currentDriverId) {
       Alert.alert("Error", "User not authenticated");
@@ -761,11 +776,11 @@ export default function PickupInfo() {
         branch_name: pickup.branch_name,
         branch_address: pickup.branch_address,
         order_id: pickup.order_id,
+        shop_name: pickup.shop_name || ""
       }
     });
   };
 
-  // Show confirmation modal
   const hideConfirmation = () => {
     if (isMounted.current) {
       setConfirmationModal({
@@ -783,7 +798,6 @@ export default function PickupInfo() {
       return;
     }
 
-    // Check if driver already has an active pickup
     if (activePickup) {
       Alert.alert(
         "Already Have Active Pickup",
@@ -824,7 +838,6 @@ export default function PickupInfo() {
       }
       hideConfirmation();
 
-      // Double-check if driver already has an active pickup
       const { data: existingActivePickup, error: activeCheckError } = await supabase
         .from("deliveries")
         .select("id")
@@ -855,7 +868,6 @@ export default function PickupInfo() {
         return;
       }
 
-      // First, check if pickup already exists to avoid race conditions
       const { data: existingPickup, error: checkError } = await supabase
         .from("deliveries")
         .select("id, driver_id")
@@ -876,7 +888,6 @@ export default function PickupInfo() {
         return;
       }
 
-      // Insert the delivery record for pickup
       const { data: pickup, error: pickupError } = await supabase
         .from("deliveries")
         .insert({
@@ -909,7 +920,6 @@ export default function PickupInfo() {
         throw pickupError;
       }
 
-      // Update order item status
       const { error: orderItemError } = await supabase
         .from("order_items")
         .update({
@@ -919,7 +929,6 @@ export default function PickupInfo() {
 
       if (orderItemError) throw orderItemError;
 
-      // Success - automatically navigate to pickup tracking
       const pickupItem = pickups.find(p => p.order_item_id === orderItemId);
       if (pickup && pickupItem && isMounted.current) {
         router.push({
@@ -940,7 +949,7 @@ export default function PickupInfo() {
       await fetchAllData(currentDriverId);
       
     } catch (error: any) {
-      console.error("Error taking pickup:", error);
+      secureLog.error("Error taking pickup:", error);
       
       if (isMounted.current) {
         if (error.code === "42501") {
@@ -977,7 +986,6 @@ export default function PickupInfo() {
     }
   };
 
-  // Pull-to-refresh handler
   const onRefresh = useCallback(async () => {
     if (!currentDriverId || !isMounted.current) return;
     
@@ -987,7 +995,6 @@ export default function PickupInfo() {
     await fetchAllData(currentDriverId);
   }, [fetchAllData, currentDriverId]);
 
-  // Real-time updates for pickups
   useEffect(() => {
     if (!currentDriverId) return;
 
@@ -1010,7 +1017,6 @@ export default function PickupInfo() {
     };
   }, [fetchAllData, currentDriverId]);
 
-  // Initial data fetch
   useEffect(() => {
     isMounted.current = true;
     initializeApp();
@@ -1020,7 +1026,6 @@ export default function PickupInfo() {
     };
   }, [initializeApp]);
 
-  // Location tracking
   useEffect(() => {
     let locationMounted = true;
     let watchId: Location.LocationSubscription | null = null;
@@ -1048,7 +1053,7 @@ export default function PickupInfo() {
           }
         );
       } catch (error) {
-        console.error("Location error:", error);
+        secureLog.error("Location error:", error);
       }
     };
 
@@ -1062,7 +1067,6 @@ export default function PickupInfo() {
     };
   }, []);
 
-  // Show authentication loading
   if (authLoading) {
     return (
       <SafeAreaView style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
@@ -1074,7 +1078,6 @@ export default function PickupInfo() {
     );
   }
 
-  // Show authentication error
   if (authError) {
     return (
       <SafeAreaView style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
@@ -1126,7 +1129,6 @@ export default function PickupInfo() {
             />
           }
         >
-          {/* Active Pickup Section */}
           {activePickup && (
             <View style={styles.activePickupContainer}>
               <View style={styles.activePickupHeader}>
@@ -1158,9 +1160,9 @@ export default function PickupInfo() {
 
           <View style={styles.infoBox}>
             <Text style={styles.infoTitle}>
-              You are assigned to {pickups[0]?.branch_name || "Main Branch Hangyu Laundry Shop"}
+              You are assigned to {driverBranchInfo?.shopName || "Laundry Shop"} - {driverBranchInfo?.name || "Main Branch"}
             </Text>
-            <Text style={styles.infoDesc}>Address: {pickups[0]?.branch_address || "Santa Rosa Street"}</Text>
+            <Text style={styles.infoDesc}>Address: {driverBranchInfo?.address || "Address not specified"}</Text>
             <Text style={styles.infoDesc}>
               {activePickup 
                 ? "You have an active pickup. Complete it to take new orders." 
@@ -1208,7 +1210,6 @@ export default function PickupInfo() {
               >
                 <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
                   <View style={{ flex: 1 }}>
-                    {/* Pickup Badge */}
                     <View style={styles.pickupBadge}>
                       <Text style={styles.pickupBadgeText}>🔄 LAUNDRY PICKUP</Text>
                     </View>
@@ -1281,7 +1282,6 @@ export default function PickupInfo() {
           )}
         </ScrollView>
 
-        {/* Confirmation Modal */}
         <Modal
           visible={confirmationModal.visible}
           transparent={true}
@@ -1342,7 +1342,6 @@ const styles = StyleSheet.create({
     flex: 1, 
     backgroundColor: "#FFFFFF" 
   },
-  // Error boundary styles
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -1375,11 +1374,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: moderateScale(14),
   },
-  // Refresh button style
   refreshButton: {
     zIndex: 3,
   },
-  // Active Pickup Styles
   activePickupContainer: {
     backgroundColor: '#fff3e0',
     margin: scale(10),
@@ -1452,7 +1449,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: moderateScale(12),
   },
-  // Pickup Badge
   pickupBadge: {
     alignSelf: 'flex-start',
     backgroundColor: '#FF6B35',
@@ -1466,7 +1462,6 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(10),
     fontWeight: 'bold',
   },
-  // One at a time warning
   oneAtATimeWarning: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1481,7 +1476,6 @@ const styles = StyleSheet.create({
     marginLeft: scale(4),
     fontWeight: '500',
   },
-  // Map Styles
   mapContainer: {
     width: scale(100),
     height: scale(100),
@@ -1528,7 +1522,6 @@ const styles = StyleSheet.create({
     color: '#3864C3',
     marginTop: 5,
   },
-  // Rest of the styles
   infoBox: {
     backgroundColor: "#D4F6F9",
     padding: scale(20),
@@ -1598,7 +1591,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: moderateScale(14),
   },
-  // Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',

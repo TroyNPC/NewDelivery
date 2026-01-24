@@ -12,8 +12,10 @@ import {
   View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { moderateScale, scale, verticalScale } from "react-native-size-matters";
 import { supabase } from "../../hooks/supabaseClient";
 import { Database } from "../../types/supabase";
+import { AppHeader } from "../component/AppHeader";
 
 type UserProfile = Database['public']['Tables']['users']['Row'];
 type ShopAssignment = Database['public']['Tables']['shop_user_assignments']['Row'] & {
@@ -222,7 +224,7 @@ export default function UserProfileScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#0AADFF" />
+          <ActivityIndicator size="large" color="#3864C3" />
           <Text style={styles.loadingText}>Loading profile...</Text>
         </View>
       </SafeAreaView>
@@ -233,19 +235,11 @@ export default function UserProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <Ionicons name="arrow-back" size={24} color="#333" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>My Profile</Text>
-          <View style={styles.headerPlaceholder} />
-        </View>
+      <AppHeader 
+        title="MY PROFILE"
+      />
 
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.avatarContainer}>
@@ -280,7 +274,7 @@ export default function UserProfileScreen() {
             <Text style={styles.sectionTitle}>Shop Assignment</Text>
             <View style={styles.assignmentCard}>
               <View style={styles.assignmentRow}>
-                <Ionicons name="business-outline" size={20} color="#0AADFF" />
+                <Ionicons name="business-outline" size={20} color="#3864C3" />
                 <View style={styles.assignmentInfo}>
                   <Text style={styles.assignmentLabel}>Shop</Text>
                   <Text style={styles.assignmentValue}>{getShopName()}</Text>
@@ -288,7 +282,7 @@ export default function UserProfileScreen() {
               </View>
               
               <View style={styles.assignmentRow}>
-                <Ionicons name="location-outline" size={20} color="#0AADFF" />
+                <Ionicons name="location-outline" size={20} color="#3864C3" />
                 <View style={styles.assignmentInfo}>
                   <Text style={styles.assignmentLabel}>Branch</Text>
                   <Text style={styles.assignmentValue}>{getBranchName()}</Text>
@@ -296,7 +290,7 @@ export default function UserProfileScreen() {
               </View>
               
               <View style={styles.assignmentRow}>
-                <Ionicons name="person-outline" size={20} color="#0AADFF" />
+                <Ionicons name="person-outline" size={20} color="#3864C3" />
                 <View style={styles.assignmentInfo}>
                   <Text style={styles.assignmentLabel}>Role</Text>
                   <Text style={styles.assignmentValue}>
@@ -306,7 +300,7 @@ export default function UserProfileScreen() {
               </View>
 
               <View style={styles.assignmentRow}>
-                <Ionicons name="calendar-outline" size={20} color="#0AADFF" />
+                <Ionicons name="calendar-outline" size={20} color="#3864C3" />
                 <View style={styles.assignmentInfo}>
                   <Text style={styles.assignmentLabel}>Assignment Date</Text>
                   <Text style={styles.assignmentValue}>
@@ -317,60 +311,6 @@ export default function UserProfileScreen() {
             </View>
           </View>
         )}
-
-        {/* Delivery Stats */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Delivery Statistics</Text>
-          <View style={styles.statsContainer}>
-            <View style={styles.statItem}>
-              <View style={[styles.statCircle, styles.totalStat]}>
-                <Ionicons name="cube-outline" size={24} color="white" />
-              </View>
-              <Text style={styles.statNumber}>{stats.totalDeliveries}</Text>
-              <Text style={styles.statLabel}>Total</Text>
-            </View>
-            
-            <View style={styles.statItem}>
-              <View style={[styles.statCircle, styles.completedStat]}>
-                <Ionicons name="checkmark-done-outline" size={24} color="white" />
-              </View>
-              <Text style={styles.statNumber}>{stats.completedDeliveries}</Text>
-              <Text style={styles.statLabel}>Completed</Text>
-            </View>
-            
-            <View style={styles.statItem}>
-              <View style={[styles.statCircle, styles.pendingStat]}>
-                <Ionicons name="time-outline" size={24} color="white" />
-              </View>
-              <Text style={styles.statNumber}>{stats.pendingDeliveries}</Text>
-              <Text style={styles.statLabel}>Pending</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Account Actions Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Account</Text>
-          <View style={styles.actionsContainer}>
-            <TouchableOpacity style={styles.actionButton}>
-              <Ionicons name="notifications-outline" size={22} color="#666" />
-              <Text style={styles.actionText}>Notification Settings</Text>
-              <Ionicons name="chevron-forward" size={18} color="#999" />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.actionButton}>
-              <Ionicons name="shield-checkmark-outline" size={22} color="#666" />
-              <Text style={styles.actionText}>Privacy & Security</Text>
-              <Ionicons name="chevron-forward" size={18} color="#999" />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.actionButton}>
-              <Ionicons name="help-circle-outline" size={22} color="#666" />
-              <Text style={styles.actionText}>Help & Support</Text>
-              <Ionicons name="chevron-forward" size={18} color="#999" />
-            </TouchableOpacity>
-          </View>
-        </View>
 
         {/* Sign Out Button */}
         <TouchableOpacity 
@@ -404,47 +344,29 @@ export default function UserProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f8f9fa",
+    backgroundColor: "#FFFFFF",
   },
   scrollView: {
     flex: 1,
   },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: "white",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e9ecef",
-  },
-  backButton: {
-    padding: 4,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#333",
-  },
-  headerPlaceholder: {
-    width: 32,
+  refreshButton: {
+    zIndex: 3,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    gap: 12,
+    gap: scale(12),
   },
   loadingText: {
-    fontSize: 16,
+    fontSize: moderateScale(16),
     color: "#666",
   },
   profileCard: {
     backgroundColor: "white",
-    margin: 20,
-    padding: 24,
-    borderRadius: 16,
+    margin: scale(20),
+    padding: scale(24),
+    borderRadius: scale(16),
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: {
@@ -456,58 +378,58 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   avatarContainer: {
-    marginBottom: 16,
+    marginBottom: verticalScale(16),
   },
   avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: scale(100),
+    height: scale(100),
+    borderRadius: scale(50),
   },
   avatarPlaceholder: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: scale(100),
+    height: scale(100),
+    borderRadius: scale(50),
     backgroundColor: "#f1f3f4",
     justifyContent: "center",
     alignItems: "center",
   },
   userName: {
-    fontSize: 24,
+    fontSize: moderateScale(24),
     fontWeight: "bold",
     color: "#333",
-    marginBottom: 4,
+    marginBottom: verticalScale(4),
     textAlign: "center",
   },
   userEmail: {
-    fontSize: 16,
+    fontSize: moderateScale(16),
     color: "#666",
-    marginBottom: 12,
+    marginBottom: verticalScale(12),
     textAlign: "center",
   },
   phoneContainer: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    marginBottom: 12,
+    gap: scale(6),
+    marginBottom: verticalScale(12),
   },
   phoneText: {
-    fontSize: 14,
+    fontSize: moderateScale(14),
     color: "#666",
   },
   section: {
-    marginHorizontal: 20,
-    marginBottom: 24,
+    marginHorizontal: scale(20),
+    marginBottom: verticalScale(24),
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: moderateScale(18),
     fontWeight: "600",
     color: "#333",
-    marginBottom: 12,
+    marginBottom: verticalScale(12),
   },
   assignmentCard: {
     backgroundColor: "white",
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: scale(12),
+    padding: scale(16),
     shadowColor: "#000",
     shadowOffset: {
       width: 0,
@@ -520,104 +442,32 @@ const styles = StyleSheet.create({
   assignmentRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    paddingVertical: 8,
+    gap: scale(12),
+    paddingVertical: verticalScale(8),
   },
   assignmentInfo: {
     flex: 1,
   },
   assignmentLabel: {
-    fontSize: 12,
+    fontSize: moderateScale(12),
     color: "#666",
-    marginBottom: 2,
+    marginBottom: verticalScale(2),
   },
   assignmentValue: {
-    fontSize: 14,
+    fontSize: moderateScale(14),
     fontWeight: "500",
     color: "#333",
-  },
-  statsContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    backgroundColor: "white",
-    borderRadius: 12,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  statItem: {
-    alignItems: "center",
-    flex: 1,
-  },
-  statCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  totalStat: {
-    backgroundColor: "#0AADFF",
-  },
-  completedStat: {
-    backgroundColor: "#28a745",
-  },
-  pendingStat: {
-    backgroundColor: "#ffc107",
-  },
-  statNumber: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 2,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: "#666",
-  },
-  actionsContainer: {
-    backgroundColor: "white",
-    borderRadius: 12,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  actionButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f1f3f4",
-  },
-  actionText: {
-    flex: 1,
-    fontSize: 16,
-    color: "#333",
-    marginLeft: 12,
   },
   signOutButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: scale(8),
     backgroundColor: "#dc3545",
-    marginHorizontal: 20,
-    marginVertical: 24,
-    paddingVertical: 16,
-    borderRadius: 12,
+    marginHorizontal: scale(20),
+    marginVertical: verticalScale(24),
+    paddingVertical: verticalScale(16),
+    borderRadius: scale(12),
     shadowColor: "#dc3545",
     shadowOffset: {
       width: 0,
@@ -632,21 +482,21 @@ const styles = StyleSheet.create({
   },
   signOutText: {
     color: "white",
-    fontSize: 16,
+    fontSize: moderateScale(16),
     fontWeight: "600",
   },
   footer: {
     alignItems: "center",
-    paddingVertical: 24,
-    paddingHorizontal: 20,
+    paddingVertical: verticalScale(24),
+    paddingHorizontal: scale(20),
   },
   footerText: {
-    fontSize: 14,
+    fontSize: moderateScale(14),
     color: "#666",
-    marginBottom: 4,
+    marginBottom: verticalScale(4),
   },
   footerVersion: {
-    fontSize: 12,
+    fontSize: moderateScale(12),
     color: "#999",
   },
 });

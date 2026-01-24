@@ -19,6 +19,23 @@ import { moderateScale, scale, verticalScale } from "react-native-size-matters";
 import { WebView } from "react-native-webview";
 import { AppHeader } from "../component/AppHeader";
 
+// Secure logging utility
+const secureLog = {
+  debug: (message: string, data?: any) => {
+    if (__DEV__) {
+      console.log(`[DEBUG] ${message}`, data);
+    }
+  },
+  error: (message: string, error?: any) => {
+    console.error(`[ERROR] ${message}`, error?.message || error);
+  },
+  warn: (message: string, data?: any) => {
+    if (__DEV__) {
+      console.warn(`[WARN] ${message}`, data);
+    }
+  }
+};
+
 type Delivery = {
   order_item_id: string;
   order_item_status: string;
@@ -40,7 +57,17 @@ type Delivery = {
   delivery_id?: string;
   order_method?: string;
   order_method_label?: string;
+  shop_name?: string;
 };
+
+interface BranchInfo {
+  branchId: string;
+  name: string;
+  address: string;
+  shopName: string;
+  latitude: number;
+  longitude: number;
+}
 
 const webViewCache = new Map<string, string>();
 
@@ -59,7 +86,7 @@ class ErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error("Error Boundary Caught:", error, errorInfo);
+    secureLog.error("Error Boundary Caught:", error);
   }
 
   render() {
@@ -201,7 +228,7 @@ const MiniMap = ({
                 
               } catch (error) {
                 if (window.ReactNativeWebView) {
-                  window.ReactNativeWebView.postMessage('map_error:' + error.message);
+                  window.ReactNativeWebView.postMessage('map_error');
                 }
               }
             </script>
@@ -257,16 +284,13 @@ const MiniMap = ({
           if (event.nativeEvent.data === 'map_loaded') {
             setIsLoading(false);
           } else if (event.nativeEvent.data.startsWith('map_error')) {
-            console.error('Map error:', event.nativeEvent.data);
             if (isMounted.current) setWebViewError(true);
           }
         }}
         onError={() => {
-          console.log('WebView error');
           if (isMounted.current) setWebViewError(true);
         }}
         onHttpError={() => {
-          console.log('WebView HTTP error');
           if (isMounted.current) setWebViewError(true);
         }}
         renderLoading={() => (
@@ -300,6 +324,7 @@ export default function LaundryInfo() {
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [takingDeliveryId, setTakingDeliveryId] = useState<string | null>(null);
   const [driverBranchId, setDriverBranchId] = useState<string | null>(null);
+  const [driverBranchInfo, setDriverBranchInfo] = useState<BranchInfo | null>(null);
   
   const [currentDriverId, setCurrentDriverId] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -324,7 +349,7 @@ export default function LaundryInfo() {
       
       return user;
     } catch (error: any) {
-      console.error("Error getting current user:", error);
+      secureLog.error("Error getting current user:", error);
       if (isMounted.current) {
         setAuthError(error.message || "Authentication failed");
       }
@@ -337,20 +362,46 @@ export default function LaundryInfo() {
   }, []);
 
   // Get driver's assigned branch
-  const getDriverBranch = useCallback(async (driverId: string) => {
+  const getDriverBranch = useCallback(async (driverId: string): Promise<BranchInfo | null> => {
     try {
       const { data, error } = await supabase
         .from("shop_user_assignments")
-        .select("branch_id")
+        .select(`
+          branch_id,
+          shops (name),
+          shop_branches (name, address, latitude, longitude)
+        `)
         .eq("user_id", driverId)
         .eq("role_in_shop", "delivery")
         .eq("is_active", true)
         .single();
 
-      if (error) throw error;
-      return data?.branch_id;
+      if (error) {
+        secureLog.error("Error fetching driver branch:", error);
+        return null;
+      }
+
+      if (data && data.branch_id) {
+        const branchInfo: BranchInfo = {
+          branchId: data.branch_id,
+          name: data.shop_branches?.name || "Main Branch",
+          address: data.shop_branches?.address || "Address not specified",
+          shopName: data.shops?.name || "Laundry Shop",
+          latitude: data.shop_branches?.latitude || 0,
+          longitude: data.shop_branches?.longitude || 0
+        };
+
+        if (isMounted.current) {
+          setDriverBranchId(data.branch_id);
+          setDriverBranchInfo(branchInfo);
+        }
+
+        return branchInfo;
+      }
+
+      return null;
     } catch (error) {
-      console.error("Error fetching driver branch:", error);
+      secureLog.error("Error fetching driver branch:", error);
       return null;
     }
   }, []);
@@ -385,7 +436,7 @@ export default function LaundryInfo() {
           )
         `)
         .eq("driver_id", driverId)
-        .in("status", ["assigned", "in_progress", "picked_up"])
+        .in("status", ["out_for_delivery", "in_progress", "picked_up"])
         .order("assigned_at", { ascending: false })
         .limit(1)
         .single();
@@ -415,6 +466,9 @@ export default function LaundryInfo() {
         const quantity = orderItem?.quantity ? Number(orderItem.quantity) : 0;
         const pricePerUnit = orderItem?.price_per_unit ? Number(orderItem.price_per_unit) : 0;
         
+        // Get branch info to include in active delivery
+        const branchInfo = await getDriverBranch(driverId);
+        
         const active: Delivery = {
           delivery_id: data.id,
           order_id: data.order_id || "",
@@ -427,63 +481,49 @@ export default function LaundryInfo() {
           delivery_longitude: data.orders?.delivery_longitude || 0,
           weight: quantity.toString() || "0",
           total_amount: (quantity * pricePerUnit).toFixed(2),
-          branch_name: "",
-          branch_address: "",
-          branch_lat: 0,
-          branch_lng: 0,
+          branch_name: branchInfo?.name || "",
+          branch_address: branchInfo?.address || "",
+          branch_lat: branchInfo?.latitude || 0,
+          branch_lng: branchInfo?.longitude || 0,
           driver_id: driverId,
           delivery_status: data.status,
           started_at: orderItem?.started_at || new Date().toISOString(),
           order_method: method?.code || "delivery",
           order_method_label: method?.label || "Delivery",
+          shop_name: branchInfo?.shopName || ""
         };
         setActiveDelivery(active);
       } else if (isMounted.current) {
         setActiveDelivery(null);
       }
     } catch (error) {
-      console.error("Error fetching active delivery:", error);
+      secureLog.error("Error fetching active delivery:", error);
       if (isMounted.current) {
         setActiveDelivery(null);
       }
     }
-  }, []);
+  }, [getDriverBranch]);
 
-  // Fixed fetchDeliveries function with correct table names
+  // Fixed fetchDeliveries function
   const fetchDeliveries = useCallback(async (driverId: string) => {
     try {
       if (isMounted.current) {
         setLoading(true);
       }
 
-      const branchId = await getDriverBranch(driverId);
-      if (!branchId) {
+      // Get driver's branch info
+      const branchInfo = await getDriverBranch(driverId);
+      if (!branchInfo || !branchInfo.branchId) {
         if (isMounted.current) {
-          Alert.alert("Error", "No branch assigned to this driver");
+          Alert.alert("Error", "No branch assigned to this driver. Please contact admin.");
           setDeliveries([]);
         }
         return;
       }
 
-      if (isMounted.current) {
-        setDriverBranchId(branchId);
-      }
+      secureLog.debug("Driver assigned to:", branchInfo);
 
-      const { data: branchData, error: branchError } = await supabase
-        .from("shop_branches")
-        .select("name, address, latitude, longitude")
-        .eq("id", branchId)
-        .single();
-
-      if (branchError) {
-        console.error("Error fetching branch details:", branchError);
-      }
-
-      const branchName = branchData?.name || "Main Branch Hangyu Laundry Shop";
-      const branchAddress = branchData?.address || "Santa Rosa Street";
-      const branchLat = branchData?.latitude || 0;
-      const branchLng = branchData?.longitude || 0;
-
+      // Fetch deliveries for this branch
       const { data: orderItems, error: itemsError } = await supabase
         .from("order_items")
         .select(`
@@ -509,7 +549,7 @@ export default function LaundryInfo() {
           )
         `)
         .eq("status", "ready_for_delivery")
-        .eq("orders.branch_id", branchId)
+        .eq("orders.branch_id", branchInfo.branchId)
         .order("started_at", { ascending: true });
 
       if (itemsError) throw itemsError;
@@ -530,7 +570,7 @@ export default function LaundryInfo() {
         .not("driver_id", "is", null);
 
       if (deliveriesError) {
-        console.error("Error checking existing deliveries:", deliveriesError);
+        secureLog.error("Error checking existing deliveries:", deliveriesError);
       }
 
       const availableOrderItems = orderItems.filter(item => {
@@ -555,7 +595,12 @@ export default function LaundryInfo() {
           const quantity = orderItem.quantity ? Number(orderItem.quantity) : 0;
           const pricePerUnit = orderItem.price_per_unit ? Number(orderItem.price_per_unit) : 0;
           
-          console.log(`Order ${orderItem.order_id} - Method:`, method);
+          if (__DEV__) {
+            secureLog.debug('Order method found', { 
+              has_method: !!method,
+              method_code: method?.code 
+            });
+          }
           
           return {
             order_item_id: orderItem.id || "",
@@ -568,47 +613,44 @@ export default function LaundryInfo() {
             delivery_longitude: order?.delivery_longitude || 0,
             weight: quantity.toString() || "0",
             total_amount: (quantity * pricePerUnit).toFixed(2),
-            branch_name: branchName,
-            branch_address: branchAddress,
-            branch_lat: branchLat,
-            branch_lng: branchLng,
+            branch_name: branchInfo.name,
+            branch_address: branchInfo.address,
+            branch_lat: branchInfo.latitude,
+            branch_lng: branchInfo.longitude,
             driver_id: null,
             delivery_status: null,
             started_at: orderItem.started_at || new Date().toISOString(),
             order_method: method?.code || "delivery",
             order_method_label: method?.label || "Delivery",
+            shop_name: branchInfo.shopName
           };
         });
 
         setDeliveries(transformedDeliveries);
         
-        console.log("All deliveries with order_method:", transformedDeliveries.map(d => ({
-          order_id: d.order_id,
-          order_method: d.order_method,
-          order_method_label: d.order_method_label,
-          customer_name: d.customer_name
-        })));
+        if (__DEV__) {
+          secureLog.debug('Deliveries loaded', {
+            count: transformedDeliveries.length,
+            delivery_types: transformedDeliveries.reduce((acc, d) => {
+              const method = d.order_method || 'unknown';
+              acc[method] = (acc[method] || 0) + 1;
+              return acc;
+            }, {} as Record<string, number>)
+          });
+        }
       }
     } catch (error: any) {
-      console.error("Error fetching deliveries:", error);
+      secureLog.error("Error fetching deliveries:", error);
       
       try {
-        const branchId = await getDriverBranch(driverId);
-        if (!branchId) return;
-
-        const { data: branchData } = await supabase
-          .from("shop_branches")
-          .select("name, address")
-          .eq("id", branchId)
-          .single();
-
-        const branchName = branchData?.name || "Main Branch Hangyu Laundry Shop";
-        const branchAddress = branchData?.address || "Santa Rosa Street";
+        // Fallback: Try a simpler query
+        const branchInfo = await getDriverBranch(driverId);
+        if (!branchInfo || !branchInfo.branchId) return;
 
         const { data: orders, error: ordersError } = await supabase
           .from("orders")
           .select("id, customer_name, customer_contact, delivery_location, delivery_latitude, delivery_longitude, method_id")
-          .eq("branch_id", branchId);
+          .eq("branch_id", branchInfo.branchId);
 
         if (ordersError) throw ordersError;
 
@@ -619,16 +661,14 @@ export default function LaundryInfo() {
           return;
         }
 
-        // With:
         const methodIds = orders
           .map(order => order.method_id)
           .filter((id): id is string => id !== null && id !== undefined);
 
-        // Then fetch shop methods
         const { data: shopMethods, error: methodsError } = await supabase
-  .from("shop_methods")
-  .select("id, code, label")
-  .in("id", methodIds); // Now methodIds is properly typed as string[]
+          .from("shop_methods")
+          .select("id, code, label")
+          .in("id", methodIds);
 
         const orderIds = orders.map(order => order.id).filter(Boolean);
         const { data: orderItems, error: itemsError } = await supabase
@@ -677,22 +717,23 @@ export default function LaundryInfo() {
               delivery_longitude: order?.delivery_longitude || 0,
               weight: quantity.toString() || "0",
               total_amount: (quantity * pricePerUnit).toFixed(2),
-              branch_name: branchName,
-              branch_address: branchAddress,
-              branch_lat: 0,
-              branch_lng: 0,
+              branch_name: branchInfo.name,
+              branch_address: branchInfo.address,
+              branch_lat: branchInfo.latitude,
+              branch_lng: branchInfo.longitude,
               driver_id: null,
               delivery_status: null,
               started_at: orderItem.started_at || new Date().toISOString(),
               order_method: method?.code || "delivery",
               order_method_label: method?.label || "Delivery",
+              shop_name: branchInfo.shopName
             };
           });
 
           setDeliveries(fallbackDeliveries);
         }
       } catch (fallbackError: any) {
-        console.error("Fallback error:", fallbackError);
+        secureLog.error("Fallback error:", fallbackError);
         if (isMounted.current) {
           Alert.alert("Error", "Failed to load deliveries. Please try again.");
           setDeliveries([]);
@@ -733,7 +774,7 @@ export default function LaundryInfo() {
       }
       await fetchAllData(user.id);
     } catch (error: any) {
-      console.error("Error initializing app:", error);
+      secureLog.error("Error initializing app:", error);
       if (isMounted.current) {
         setAuthError(error.message || "Failed to initialize app");
       }
@@ -744,7 +785,7 @@ export default function LaundryInfo() {
     }
   }, [getCurrentUser, fetchAllData]);
 
-  // Navigate to map preview screen (like pickup flow)
+  // Navigate to map preview screen
   const showMapPreview = (delivery: Delivery) => {
     if (!currentDriverId) {
       Alert.alert("Error", "User not authenticated");
@@ -788,6 +829,7 @@ export default function LaundryInfo() {
         order_id: delivery.order_id,
         order_method: delivery.order_method || "delivery",
         order_method_label: delivery.order_method_label || "Delivery",
+        shop_name: delivery.shop_name || ""
       }
     });
   };
@@ -877,7 +919,7 @@ export default function LaundryInfo() {
           }
         );
       } catch (error) {
-        console.error("Location error:", error);
+        secureLog.error("Location error:", error);
       }
     };
 
@@ -989,9 +1031,9 @@ export default function LaundryInfo() {
 
           <View style={styles.infoBox}>
             <Text style={styles.infoTitle}>
-              You are assigned to {deliveries[0]?.branch_name || "Main Branch Hangyu Laundry Shop"}
+              You are assigned to {driverBranchInfo?.shopName || "Laundry Shop"} - {driverBranchInfo?.name || "Main Branch"}
             </Text>
-            <Text style={styles.infoDesc}>Address: {deliveries[0]?.branch_address || "Santa Rosa Street"}</Text>
+            <Text style={styles.infoDesc}>Address: {driverBranchInfo?.address || "Address not specified"}</Text>
             <Text style={styles.infoDesc}>
               {activeDelivery 
                 ? "You have an active delivery. Complete it to take new orders." 

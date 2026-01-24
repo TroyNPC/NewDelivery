@@ -1,4 +1,4 @@
-import { supabase } from "@/hooks/supabaseClient"; // Adjust import path as needed
+import { supabase } from "@/hooks/supabaseClient";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -17,7 +17,7 @@ import {
   scale,
   verticalScale,
 } from "react-native-size-matters";
-import Svg, { Path } from "react-native-svg";
+import { AppHeader } from "../component/AppHeader";
 
 type HistoryItem = {
   id: string;
@@ -30,6 +30,12 @@ type HistoryItem = {
   status: string | null;
   weight?: number | null;
   total_amount?: number | null;
+  service_name?: string | null;
+  detergent_name?: string | null;
+  softener_name?: string | null;
+  method_label?: string | null;
+  branch_name?: string | null;
+  isExpanded?: boolean;
 };
 
 export default function History() {
@@ -57,11 +63,26 @@ export default function History() {
       let pickupHistory: HistoryItem[] = [];
       let deliveryHistory: HistoryItem[] = [];
 
-      // Fetch pickup history
+      // Fetch pickup history with explicit column selection
       if (activeTab === 'all' || activeTab === 'pickups') {
         const { data: pickups, error: pickupError } = await supabase
           .from('pickup_history')
-          .select('*')
+          .select(`
+            id,
+            driver_id,
+            customer_name,
+            customer_contact,
+            pickup_address,
+            service_type,
+            service_name,
+            detergent_name,
+            softener_name,
+            method_label,
+            branch_name,
+            collected_at,
+            status,
+            estimated_weight
+          `)
           .eq('driver_id', user.id)
           .order('collected_at', { ascending: false });
 
@@ -72,19 +93,41 @@ export default function History() {
             customer_name: item.customer_name,
             customer_contact: item.customer_contact,
             address: item.pickup_address,
-            service_type: item.service_type,
+            service_type: item.service_type || item.service_name,
             completed_at: item.collected_at,
             status: item.status,
             weight: item.estimated_weight,
+            service_name: item.service_name,
+            detergent_name: item.detergent_name,
+            softener_name: item.softener_name,
+            method_label: item.method_label,
+            branch_name: item.branch_name,
+            isExpanded: false,
           }));
         }
       }
 
-      // Fetch delivery history
+      // Fetch delivery history with explicit column selection
       if (activeTab === 'all' || activeTab === 'deliveries') {
         const { data: deliveries, error: deliveryError } = await supabase
           .from('delivery_history')
-          .select('*')
+          .select(`
+            id,
+            driver_id,
+            customer_name,
+            customer_contact,
+            delivery_address,
+            service_type,
+            service_name,
+            detergent_name,
+            softener_name,
+            method_label,
+            branch_name,
+            delivered_at,
+            status,
+            weight,
+            total_amount
+          `)
           .eq('driver_id', user.id)
           .order('delivered_at', { ascending: false });
 
@@ -95,11 +138,17 @@ export default function History() {
             customer_name: item.customer_name,
             customer_contact: item.customer_contact,
             address: item.delivery_address,
-            service_type: item.service_type,
+            service_type: item.service_type || item.service_name,
             completed_at: item.delivered_at,
             status: item.status,
             weight: item.weight,
             total_amount: item.total_amount,
+            service_name: item.service_name,
+            detergent_name: item.detergent_name,
+            softener_name: item.softener_name,
+            method_label: item.method_label,
+            branch_name: item.branch_name,
+            isExpanded: false,
           }));
         }
       }
@@ -116,15 +165,33 @@ export default function History() {
     }
   };
 
+  const toggleItemExpanded = (itemId: string) => {
+    setHistory(prevHistory => 
+      prevHistory.map(item => 
+        item.id === itemId 
+          ? { ...item, isExpanded: !item.isExpanded }
+          : item
+      )
+    );
+  };
+
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return 'Invalid date';
+      }
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return 'Invalid date';
+    }
   };
 
   const getStatusIcon = (type: 'pickup' | 'delivery', status: string | null) => {
@@ -150,26 +217,37 @@ export default function History() {
     return status.charAt(0).toUpperCase() + status.slice(1);
   };
 
+  const getServiceDetails = (item: HistoryItem) => {
+    const details = [];
+    
+    const serviceName = item.service_name || item.service_type;
+    if (serviceName) {
+      details.push(serviceName);
+    }
+    
+    if (item.detergent_name) {
+      details.push(`Detergent: ${item.detergent_name}`);
+    }
+    
+    if (item.softener_name) {
+      details.push(`Softener: ${item.softener_name}`);
+    }
+    
+    if (item.method_label) {
+      details.push(item.method_label);
+    }
+    
+    if (item.branch_name) {
+      details.push(item.branch_name);
+    }
+    
+    return details;
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={[styles.container, { minHeight: height }]}>
-        <View style={[styles.headerBox, { height: verticalScale(100) }]}>
-          <Svg
-            width={"100%"}
-            height={verticalScale(200)}
-            viewBox="0 0 1200 320"
-            style={styles.waveTop}
-            preserveAspectRatio="none"
-          >
-            <Path
-              fill="#3864C3"
-              d="M0,64 C480,-32 720,256 1440,64 L1440,0 L0,0 Z"
-            />
-          </Svg>
-          <View style={styles.headerContent}>
-            <Text style={styles.headerTitle}>History</Text>
-          </View>
-        </View>
+        <AppHeader title="HISTORY" />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#3864C3" />
           <Text style={styles.loadingText}>Loading history...</Text>
@@ -180,24 +258,17 @@ export default function History() {
 
   return (
     <SafeAreaView style={[styles.container, { minHeight: height }]}>
-      {/* Header */}
-      <View style={[styles.headerBox, { height: verticalScale(100) }]}>
-        <Svg
-          width={"100%"}
-          height={verticalScale(200)}
-          viewBox="0 0 1200 320"
-          style={styles.waveTop}
-          preserveAspectRatio="none"
-        >
-          <Path
-            fill="#3864C3"
-            d="M0,64 C480,-32 720,256 1440,64 L1440,0 L0,0 Z"
-          />
-        </Svg>
-        <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>History</Text>
-        </View>
-      </View>
+      <AppHeader 
+        title="HISTORY"
+        rightElement={
+          <TouchableOpacity 
+            onPress={fetchHistory} 
+            style={styles.refreshButton}
+          >
+            <Ionicons name="refresh" size={24} color="white" />
+          </TouchableOpacity>
+        }
+      />
 
       {/* Tab Navigation */}
       <View style={styles.tabContainer}>
@@ -270,7 +341,10 @@ export default function History() {
           history.map((item) => {
             const statusInfo = getStatusIcon(item.type, item.status);
             const typeColor = getTypeColor(item.type);
-            
+            const serviceDetails = getServiceDetails(item);
+            const isExpanded = item.isExpanded || false;
+            const hasServiceDetails = serviceDetails.length > 0;
+
             return (
               <View
                 key={item.id}
@@ -293,7 +367,7 @@ export default function History() {
                   </View>
                 </View>
 
-                {/* Customer Info */}
+                {/* Customer Info - Always visible */}
                 <Text style={styles.customerName}>For: {item.customer_name}</Text>
                 {item.customer_contact && (
                   <View style={styles.contactRow}>
@@ -302,41 +376,66 @@ export default function History() {
                   </View>
                 )}
 
-                {/* Address */}
+                {/* Address - Always visible */}
                 <View style={styles.addressRow}>
                   <Ionicons name="location-outline" size={16} color="#666" />
                   <Text style={styles.addressText}>{item.address}</Text>
                 </View>
 
-                {/* Service Details */}
-                <View style={styles.detailsRow}>
-                  {item.service_type && (
-                    <View style={styles.detailItem}>
-                      <Ionicons name="cube-outline" size={14} color="#3864C3" />
-                      <Text style={styles.serviceText}>{item.service_type}</Text>
-                    </View>
-                  )}
-                  {item.weight && (
-                    <View style={styles.detailItem}>
+                {/* Service Details - Only show when expanded */}
+                {isExpanded && hasServiceDetails && (
+                  <View style={styles.detailsContainer}>
+                    <Text style={styles.detailsTitle}>Service Details:</Text>
+                    {serviceDetails.map((detail, index) => (
+                      <View key={index} style={styles.detailItem}>
+                        <Ionicons name="information-circle-outline" size={14} color="#3864C3" />
+                        <Text style={styles.detailText}>{detail}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {/* Weight and Amount - Always visible */}
+                <View style={styles.metricsRow}>
+                  {item.weight != null && (
+                    <View style={styles.metricItem}>
                       <Ionicons name="scale-outline" size={14} color="#666" />
-                      <Text style={styles.detailText}>{item.weight}kg</Text>
+                      <Text style={styles.metricText}>{item.weight}kg</Text>
                     </View>
                   )}
-                  {item.total_amount && (
-                    <View style={styles.detailItem}>
+                  
+                  {item.total_amount != null && (
+                    <View style={styles.metricItem}>
                       <Ionicons name="cash-outline" size={14} color="#666" />
-                      <Text style={styles.detailText}>₱{item.total_amount}</Text>
+                      <Text style={styles.metricText}>₱{item.total_amount}</Text>
                     </View>
                   )}
                 </View>
 
-                {/* Completion Time */}
+                {/* Completion Time - Always visible */}
                 <View style={styles.timeRow}>
                   <Ionicons name="time-outline" size={14} color="#666" />
                   <Text style={styles.timeText}>
                     Completed: {formatDate(item.completed_at)}
                   </Text>
                 </View>
+
+                {/* Show More/Less Button - Only show if there are service details */}
+                {hasServiceDetails && (
+                  <TouchableOpacity 
+                    style={styles.showMoreButton}
+                    onPress={() => toggleItemExpanded(item.id)}
+                  >
+                    <Text style={styles.showMoreText}>
+                      {isExpanded ? `Show Less` : `Show Service Details`}
+                    </Text>
+                    <Ionicons 
+                      name={isExpanded ? "chevron-up" : "chevron-down"} 
+                      size={16} 
+                      color="#3864C3" 
+                    />
+                  </TouchableOpacity>
+                )}
               </View>
             );
           })
@@ -348,26 +447,8 @@ export default function History() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#FFFFFF" },
-  headerBox: {
-    width: "100%",
-    backgroundColor: "#3864C3",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  waveTop: { position: "absolute", top: 0, left: 0, zIndex: 1 },
-  headerContent: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: scale(10),
-    zIndex: 2,
-    marginTop: verticalScale(30),
-  },
-  headerTitle: {
-    fontSize: moderateScale(22),
-    fontWeight: "bold",
-    color: "white",
-    textAlign: "center",
+  refreshButton: {
+    zIndex: 3,
   },
   tabContainer: {
     flexDirection: 'row',
@@ -460,24 +541,57 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: verticalScale(20),
   },
-  detailsRow: {
+  detailsContainer: {
+    marginBottom: verticalScale(8),
+    padding: scale(12),
+    backgroundColor: '#F8F9FA',
+    borderRadius: scale(8),
+  },
+  detailsTitle: {
+    fontSize: moderateScale(14),
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: verticalScale(6),
+  },
+  detailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: verticalScale(4),
+  },
+  detailText: {
+    fontSize: moderateScale(13),
+    color: "#3864C3",
+    fontWeight: '500',
+    marginLeft: scale(4),
+    flex: 1,
+  },
+  showMoreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: verticalScale(8),
+    marginTop: verticalScale(4),
+    borderTopWidth: 1,
+    borderTopColor: '#E5E5E5',
+  },
+  showMoreText: {
+    fontSize: moderateScale(13),
+    color: "#3864C3",
+    fontWeight: '600',
+    marginRight: scale(4),
+  },
+  metricsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     marginBottom: verticalScale(8),
   },
-  detailItem: {
+  metricItem: {
     flexDirection: 'row',
     alignItems: 'center',
     marginRight: scale(12),
     marginBottom: verticalScale(4),
   },
-  serviceText: {
-    fontSize: moderateScale(13),
-    color: "#3864C3",
-    fontWeight: '500',
-    marginLeft: scale(4),
-  },
-  detailText: {
+  metricText: {
     fontSize: moderateScale(13),
     color: "#666",
     marginLeft: scale(4),

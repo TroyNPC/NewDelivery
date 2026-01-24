@@ -25,8 +25,8 @@ import {
   View,
 } from "react-native";
 import { moderateScale, scale, verticalScale } from "react-native-size-matters";
-import Svg, { Path } from "react-native-svg";
 import { WebView } from "react-native-webview";
+import { AppHeader } from "../component/AppHeader";
 // FIXED: Include out_for_delivery status
 type DeliveryStatus = "out_for_delivery" | "delivered";
 
@@ -377,7 +377,7 @@ const getMapHTML = (deliveryLat: number, deliveryLng: number, customerName: stri
         
         <div id="map"></div>
         
-        <div id="debugPanel" class="debug-panel" style="display: none;">
+        <div id="debugPanel" class="debug-panel:none" style="display: none;">
           <div>Map: <span id="debugMapStatus">Not initialized</span></div>
           <div>Marker: <span id="debugMarkerStatus">Not created</span></div>
           <div>Last Location: <span id="debugLastLocation">None</span></div>
@@ -1150,184 +1150,51 @@ const sendDeliveryNotification = async (status: DeliveryStatus) => {
   }, [deliveryId, isOnline]);
   
   // 🔥 FIXED: COMPLETE CLEANUP FUNCTION - ARCHIVE TO ORDER_HISTORY AND DELETE FROM ALL TABLES
-  const updateDeliveryStatus = async (newStatus: DeliveryStatus) => {
-    addDebugLog(`Updating status to: ${newStatus}`);
-    try {
-      setIsUpdating(true);
-      
-      const updateData: any = {
-        status: newStatus,
-      };
+  // 🔥 FIXED: COMPLETE CLEANUP FUNCTION - Wait for triggers to archive first
+const updateDeliveryStatus = async (newStatus: DeliveryStatus) => {
+  addDebugLog(`Updating status to: ${newStatus}`);
+  try {
+    setIsUpdating(true);
+    
+    const updateData: any = {
+      status: newStatus,
+    };
 
-      // FIXED: Only handle delivered status
-      if (newStatus === "delivered") {
-        updateData.delivered_at = new Date().toISOString();
-      }
-
-      const { error: deliveryError } = await supabase
-        .from("deliveries")
-        .update(updateData)
-        .eq("id", deliveryId);
-
-      if (deliveryError) throw deliveryError;
-
-      // 🔥 COMPLETE CLEANUP: Only when delivery is marked as delivered
-      if (newStatus === "delivered") {
-        addDebugLog('Starting complete cleanup process...');
-        
-        // 1. Get the order_id from the delivery record
-        const { data: deliveryData, error: fetchError } = await supabase
-          .from("deliveries")
-          .select("order_id")
-          .eq("id", deliveryId)
-          .single();
-
-        if (fetchError) {
-          addDebugLog(`Error fetching delivery order_id: ${fetchError.message}`);
-          throw new Error(`Failed to fetch order details: ${fetchError.message}`);
-        }
-
-        if (deliveryData?.order_id) {
-          const orderId = deliveryData.order_id;
-          addDebugLog(`Found order_id: ${orderId} for cleanup`);
-          
-          // 2. Get complete order and order_items data for order_history
-          const { data: orderData, error: orderFetchError } = await supabase
-            .from("orders")
-            .select(`
-              *,
-              order_items(*),
-              branch:shop_branches(shop_id, name, address),
-              method:shop_methods(code, label),
-              service:shop_services(name, price_per_kg),
-              detergent:detergent_types(name),
-              softener:softener_types(name)
-            `)
-            .eq("id", orderId)
-            .single();
-
-          if (orderFetchError) {
-            addDebugLog(`Error fetching order data: ${orderFetchError.message}`);
-            throw new Error(`Failed to fetch order data: ${orderFetchError.message}`);
-          }
-
-          if (orderData) {
-            addDebugLog('Order data fetched successfully, preparing for order_history insertion');
-            
-            // 3. Insert into order_history with complete data
-            const orderItem = orderData.order_items?.[0];
-            const historyData = {
-            shop_id: orderData.branch?.shop_id || '00000000-0000-0000-0000-000000000000', // ✅ Default UUID
-            branch_id: orderData.branch_id || '00000000-0000-0000-0000-000000000000', // ✅ Default UUID
-              customer_name: orderData.customer_name || 'Customer',
-              customer_contact: orderData.customer_contact || null,
-              delivery_location: orderData.delivery_location || null,
-              method_id: orderData.method_id || null,
-              method_code: orderData.method?.code || null,
-              method_label: orderData.method?.label || null,
-              service_name: orderData.service?.name || 'Standard Service',
-              detergent_name: orderData.detergent?.name || null,
-              softener_name: orderData.softener?.name || null,
-              weight: orderItem?.quantity || 0,
-              price: orderItem?.subtotal || 0,
-              status: 'completed',
-              completed_at: new Date().toISOString(),
-              created_at: orderData.created_at || new Date().toISOString(),
-              customer_id: orderData.customer_id || null
-            };
-
-            addDebugLog('Inserting into order_history...');
-            const { data: historyRecord, error: historyError } = await supabase
-              .from("order_history")
-              .insert(historyData)
-              .select()
-              .single();
-
-            if (historyError) {
-              addDebugLog(`Error inserting into order_history: ${historyError.message}`);
-              throw new Error(`Failed to save order to history: ${historyError.message}`);
-            }
-
-            addDebugLog(`✅ Successfully inserted into order_history: ${historyRecord.id}`);
-
-            // 4. Delete from order_items (work queue)
-            addDebugLog('Deleting from order_items...');
-            const { error: orderItemsDeleteError } = await supabase
-              .from("order_items")
-              .delete()
-              .eq("order_id", orderId);
-
-            if (orderItemsDeleteError) {
-              addDebugLog(`Error deleting from order_items: ${orderItemsDeleteError.message}`);
-              // Don't throw error here - continue with cleanup
-            } else {
-              addDebugLog('✅ Successfully deleted from order_items');
-            }
-
-            // 5. Delete from orders (inbox)
-            addDebugLog('Deleting from orders...');
-            const { error: ordersDeleteError } = await supabase
-              .from("orders")
-              .delete()
-              .eq("id", orderId);
-
-            if (ordersDeleteError) {
-              addDebugLog(`Error deleting from orders: ${ordersDeleteError.message}`);
-              // Don't throw error here - continue with cleanup
-            } else {
-              addDebugLog('✅ Successfully deleted from orders');
-            }
-
-            // 6. Delete from deliveries (delivery tracking)
-            addDebugLog('Deleting from deliveries...');
-            const { error: deliveriesDeleteError } = await supabase
-              .from("deliveries")
-              .delete()
-              .eq("id", deliveryId);
-
-            if (deliveriesDeleteError) {
-              addDebugLog(`Error deleting from deliveries: ${deliveriesDeleteError.message}`);
-              // Don't throw error here - main cleanup is done
-            } else {
-              addDebugLog('✅ Successfully deleted from deliveries');
-            }
-
-            addDebugLog('🎉 COMPLETE CLEANUP FINISHED - Order archived to history and cleaned from all tables');
-          } else {
-            addDebugLog('❌ No order data found for cleanup');
-            throw new Error('No order data found for cleanup');
-          }
-        } else {
-          addDebugLog('❌ No order_id found in delivery record');
-          throw new Error('No order ID found in delivery record');
-        }
-      }
-
-      setDeliveryStatus(newStatus);
-
-      await sendDeliveryNotification(newStatus);
-      
-      // FIXED: Status messages
-      const statusMessages: Record<DeliveryStatus, string> = {
-        out_for_delivery: "Delivery tracking started!",
-        delivered: "Delivery completed successfully! Order archived to history."
-      };
-      
-      Alert.alert("Success", statusMessages[newStatus]);
-
-      if (newStatus === "delivered") {
-        setTimeout(() => {
-          router.push("/(tabs)/deliveries");
-        }, 2000);
-      }
-
-    } catch (error: any) {
-      addDebugLog(`Status update error: ${error.message}`);
-      Alert.alert("Error", error.message || "Failed to update delivery status");
-    } finally {
-      setIsUpdating(false);
+    if (newStatus === "delivered") {
+      updateData.delivered_at = new Date().toISOString();
     }
-  };
+
+    // JUST update the delivery status
+    const { error: deliveryError } = await supabase
+      .from("deliveries")
+      .update(updateData)
+      .eq("id", deliveryId);
+
+    if (deliveryError) throw deliveryError;
+
+    // Database triggers handle everything else!
+    setDeliveryStatus(newStatus);
+    await sendDeliveryNotification(newStatus);
+    
+    Alert.alert("Success", 
+      newStatus === "delivered" 
+        ? "Delivery completed! Records archived and cleaned up automatically."
+        : "Delivery status updated!"
+    );
+
+    if (newStatus === "delivered") {
+      setTimeout(() => {
+        router.push("/(tabs)/deliveries");
+      }, 2000);
+    }
+
+  } catch (error: any) {
+    addDebugLog(`Status update error: ${error.message}`);
+    Alert.alert("Error", error.message || "Failed to update delivery status");
+  } finally {
+    setIsUpdating(false);
+  }
+};
 
   // Send location update to WebView
   const sendLocationToWebView = useCallback((coords: LocationCoords, isFullMap: boolean = false) => {
@@ -1658,32 +1525,7 @@ useEffect(() => {
   );
 
   // Debug panel component
-  const DebugPanel = () => (
-    <View style={styles.debugPanel}>
-      <Text style={styles.debugTitle}>Delivery Status</Text>
-      <StatusIndicator />
-      <Text>Location: {currentLocation ? `${currentLocation.lat.toFixed(6)}, ${currentLocation.lng.toFixed(6)}` : 'None'}</Text>
-      <Text>Accuracy: {getAccuracyDisplay(currentLocation?.accuracy)}</Text>
-      <Text>Map Ready: {anyMapReady ? '✅' : '❌'}</Text>
-      <Text>Status: {deliveryStatus}</Text>
-      <Text>Type: {orderMethod === "pickup" ? "🔄 PICKUP RETURN" : "📦 DELIVERY"}</Text>
-      <Text>Distance: {distance}</Text>
-      <Text>ETA: {eta}</Text>
-      <Text>Next Turn: {nextInstruction ? `${nextInstruction.text} in ${formatDistance(nextInstruction.distance)}` : 'None'}</Text>
-      <Text>Arrived: {hasArrived ? '✅' : '❌'}</Text>
-      <Text>Recalculating: {recalculating ? '🔄' : '✅'}</Text>
-      <TouchableOpacity 
-        style={styles.reloadButton}
-        onPress={reloadWebViews}
-      >
-        <Text style={styles.reloadButtonText}>RELOAD MAPS</Text>
-      </TouchableOpacity>
-      <Text style={styles.debugLogsTitle}>Recent Logs:</Text>
-      {debugLogs.map((log, index) => (
-        <Text key={index} style={styles.debugLog}>{log}</Text>
-      ))}
-    </View>
-  );
+ 
 
   if (!currentLocation && !locationError) {
     return (
@@ -1697,24 +1539,18 @@ useEffect(() => {
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
-      <View style={styles.headerBox}>
-        <Svg width="100%" height={verticalScale(90)} viewBox="0 0 1440 320" style={styles.waveTop}>
-          <Path fill="#3864C3" d="M0,64 C720,-32 720,160 1440,64 L1440,0 L0,0 Z" />
-        </Svg>
-        <View style={styles.headerContent}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="white" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>
-            {orderMethod === "pickup" ? "RETURN DELIVERY" : "DELIVERY TRACKING"}
-          </Text>
-          <View style={{ width: 24 }} />
-        </View>
-      </View>
+   {/* Header */}
+<AppHeader 
+  title={orderMethod === "pickup" ? "RETURN DELIVERY" : "DELIVERY TRACKING"}
+  leftElement={
+    <TouchableOpacity onPress={() => router.back()}>
+      <Ionicons name="arrow-back" size={24} color="white" />
+    </TouchableOpacity>
+  }
+/>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Debug Panel */}
-        <DebugPanel />
 
         {/* Status Card */}
         <View style={[styles.statusCard, { borderLeftColor: currentStatus.color }]}>
@@ -1983,14 +1819,6 @@ const styles = StyleSheet.create({
     color: '#666',
     marginLeft: scale(6),
     fontWeight: '500',
-  },
-  debugPanel: {
-    backgroundColor: '#f8f9fa',
-    padding: scale(12),
-    borderRadius: scale(8),
-    marginBottom: verticalScale(12),
-    borderLeftWidth: 4,
-    borderLeftColor: '#FF6B35',
   },
   debugTitle: {
     fontSize: moderateScale(14),

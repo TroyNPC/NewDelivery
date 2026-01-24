@@ -22,6 +22,7 @@ import { supabase } from "../hooks/supabaseClient";
 export default function HomeScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true); // New state for session check
   const [credentials, setCredentials] = useState({
     email: "",
     password: "",
@@ -40,6 +41,11 @@ export default function HomeScreen() {
     return () => subscription?.remove();
   }, []);
 
+  // Check for existing session on app start
+  useEffect(() => {
+    checkExistingSession();
+  }, []);
+
   // Responsive scaling functions
   const scale = (size: number) => {
     const { width } = dimensions;
@@ -55,6 +61,34 @@ export default function HomeScreen() {
 
   const moderateScale = (size: number, factor = 0.5) => {
     return size + (scale(size) - size) * factor;
+  };
+
+  const checkExistingSession = async () => {
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      
+      if (error) {
+        console.log("Session check error:", error);
+        setCheckingSession(false);
+        return;
+      }
+
+      if (session?.user) {
+        // User has an existing session, check their role
+        const isDeliveryPerson = await checkDeliveryRole(session.user.id);
+        
+        if (isDeliveryPerson) {
+          router.replace("/deliveries");
+        } else {
+          // User doesn't have delivery role, sign them out
+          await supabase.auth.signOut();
+        }
+      }
+    } catch (error) {
+      console.log("Session check error:", error);
+    } finally {
+      setCheckingSession(false);
+    }
   };
 
   const checkDeliveryRole = async (userId: string): Promise<boolean> => {
@@ -162,6 +196,42 @@ export default function HomeScreen() {
 
   // Responsive styles based on screen dimensions
   const responsiveStyles = createResponsiveStyles(dimensions, scale, verticalScale, moderateScale);
+
+  // Show loading screen while checking for existing session
+  if (checkingSession) {
+    return (
+      <SafeAreaView style={[responsiveStyles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <View style={responsiveStyles.brandingSection}>
+          <ImageBackground 
+            style={responsiveStyles.logoContainer}
+            imageStyle={responsiveStyles.logoImageStyle}
+          >
+            <Image
+              source={require("../assets/images/delivery.png")}
+              style={responsiveStyles.logo}
+              resizeMode="contain"
+            />
+          </ImageBackground>
+
+          <View style={responsiveStyles.titleContainer}>
+            <Text style={responsiveStyles.title} numberOfLines={2}>
+              LaundryGo Delivery
+            </Text>
+            <Text style={responsiveStyles.subtitle}>
+              Partner Portal
+            </Text>
+          </View>
+        </View>
+        
+        <View style={{ marginTop: verticalScale(40) }}>
+          <ActivityIndicator size="large" color="#FFFFFF" />
+          <Text style={[responsiveStyles.subtitle, { marginTop: verticalScale(20) }]}>
+            Checking authentication...
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>

@@ -15,6 +15,24 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { moderateScale, scale, verticalScale } from "react-native-size-matters";
 import { WebView } from "react-native-webview";
+import { AppHeader } from "../component/AppHeader";
+
+// Secure logging utility
+const secureLog = {
+  debug: (message: string, data?: any) => {
+    if (__DEV__) {
+      console.log(`[DEBUG] ${message}`, data);
+    }
+  },
+  error: (message: string, error?: any) => {
+    console.error(`[ERROR] ${message}`, error?.message || error);
+  },
+  warn: (message: string, data?: any) => {
+    if (__DEV__) {
+      console.warn(`[WARN] ${message}`, data);
+    }
+  }
+};
 
 export default function MapPreviewScreen() {
   const router = useRouter();
@@ -23,7 +41,7 @@ export default function MapPreviewScreen() {
   
   const { user, loading: authLoading } = useAuth();
 
-  // Extract parameters directly like the pickup example
+  // Extract parameters
   const delivery = {
     order_item_id: params.order_item_id as string,
     order_id: params.order_id as string,
@@ -50,7 +68,7 @@ export default function MapPreviewScreen() {
   const isMounted = useRef(true);
   const webViewRef = useRef<WebView>(null);
 
-  // Generate stable map HTML - only once when component mounts
+  // Generate map HTML
   useEffect(() => {
     isMounted.current = true;
 
@@ -69,7 +87,6 @@ export default function MapPreviewScreen() {
           throw new Error('Invalid coordinates for map generation');
         }
 
-        // Create a stable HTML string that won't change on re-renders
         const html = `
 <!DOCTYPE html>
 <html>
@@ -120,7 +137,6 @@ export default function MapPreviewScreen() {
       
       function initializeMap() {
         try {
-          // Initialize map
           map = L.map('map', {
             zoomControl: true,
             dragging: true,
@@ -131,13 +147,11 @@ export default function MapPreviewScreen() {
             tap: true
           }).setView([${delivery.current_lat}, ${delivery.current_lng}], 13);
           
-          // Add tile layer
           L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '© OpenStreetMap'
           }).addTo(map);
 
-          // User location marker
           const userIcon = L.divIcon({
             className: 'user-marker',
             iconSize: [20, 20],
@@ -148,7 +162,6 @@ export default function MapPreviewScreen() {
             icon: userIcon
           }).addTo(map).bindPopup("Your Location");
 
-          // Delivery location marker
           const deliveryIcon = L.divIcon({
             className: 'delivery-marker',
             iconSize: [16, 16],
@@ -157,9 +170,8 @@ export default function MapPreviewScreen() {
           
           L.marker([${delivery.delivery_latitude}, ${delivery.delivery_longitude}], { 
             icon: deliveryIcon 
-          }).addTo(map).bindPopup("Delivery to ${delivery.customer_name.replace(/'/g, "\\'")}");
+          }).addTo(map).bindPopup("Delivery Location");
 
-          // Add routing control
           if (typeof L.Routing !== 'undefined') {
             L.Routing.control({
               waypoints: [
@@ -177,22 +189,17 @@ export default function MapPreviewScreen() {
             }).addTo(map);
           }
 
-          // Force resize to ensure proper rendering
           setTimeout(() => {
             map.invalidateSize();
           }, 100);
-
-          console.log('Map initialized successfully');
           
         } catch (error) {
           console.error('Map initialization error:', error);
         }
       }
 
-      // Initialize map when DOM is loaded
       document.addEventListener('DOMContentLoaded', initializeMap);
       
-      // Fallback initialization
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initializeMap);
       } else {
@@ -206,7 +213,7 @@ export default function MapPreviewScreen() {
           setMapHTML(html);
         }
       } catch (error: any) {
-        console.error('Map HTML generation error:', error);
+        secureLog.error('Map HTML generation error:', error);
         if (isMounted.current) {
           setMapError(error.message || 'Failed to generate map');
         }
@@ -218,7 +225,7 @@ export default function MapPreviewScreen() {
     return () => {
       isMounted.current = false;
     };
-  }, []); // Empty dependency array - generate once on mount
+  }, []);
 
   // Handle WebView load events
   const handleWebViewLoad = () => {
@@ -228,206 +235,174 @@ export default function MapPreviewScreen() {
   };
 
   const handleWebViewError = (error: any) => {
-    console.error('WebView error:', error);
+    secureLog.error('WebView error:', error);
     if (isMounted.current) {
       setMapError('Failed to load map');
       setMapLoading(false);
     }
   };
-  // 🔥 ADD THIS FUNCTION AT THE TOP OF YOUR COMPONENT FILE
-const sendCustomerNotification = async (
-  customerId: string,
-  notificationData: {
-    title: string;
-    body: string;
-    payload: any;
-  }
-): Promise<{ databaseSuccess: boolean; pushSuccess: boolean }> => {
-  try {
-    console.log('📢 Sending notification to customer:', customerId);
-    
-    if (!customerId) {
-      console.log('👤 No customer ID - skipping notification');
-      return { databaseSuccess: false, pushSuccess: false };
+
+  // Notification service
+  const sendCustomerNotification = async (
+    customerId: string,
+    notificationData: {
+      title: string;
+      body: string;
+      payload: any;
     }
-
-    const results = {
-      databaseSuccess: false,
-      pushSuccess: false
-    };
-
-    // 1. SAVE TO DATABASE NOTIFICATIONS TABLE
+  ): Promise<{ databaseSuccess: boolean; pushSuccess: boolean }> => {
     try {
-      const { error: dbError } = await supabase
-        .from('notifications')
-        .insert({
-          user_id: customerId,
-          title: notificationData.title,
-          body: notificationData.body,
-          payload: notificationData.payload,
-          sent_at: new Date().toISOString()
-        });
-
-      if (dbError) {
-        console.error('❌ Database notification error:', dbError);
-      } else {
-        results.databaseSuccess = true;
-        console.log('✅ Database notification saved');
-      }
-    } catch (dbError) {
-      console.error('❌ Database notification failed:', dbError);
-    }
-
-    // 2. SEND PUSH NOTIFICATION VIA EXPO
-    try {
-      // Get customer's push tokens
-      const { data: pushTokens, error: tokenError } = await supabase
-        .from('user_push_tokens')
-        .select('expo_push_token')
-        .eq('user_id', customerId)
-        .not('expo_push_token', 'is', null);
-
-      if (tokenError || !pushTokens || pushTokens.length === 0) {
-        console.log('📭 No push tokens found for customer:', customerId);
-        return results;
+      if (!customerId) {
+        return { databaseSuccess: false, pushSuccess: false };
       }
 
-      console.log(`📲 Sending push to ${pushTokens.length} device(s)`);
+      const results = {
+        databaseSuccess: false,
+        pushSuccess: false
+      };
 
-      // Send to all devices in parallel
-      const pushPromises = pushTokens.map(async (token) => {
-        const message = {
-          to: token.expo_push_token,
-          sound: 'default' as const,
-          title: notificationData.title,
-          body: notificationData.body,
-          data: {
-            ...notificationData.payload,
-            type: 'order_update'
-          }
-        };
-
-        try {
-          const response = await fetch('https://exp.host/--/api/v2/push/send', {
-            method: 'POST',
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(message),
+      // Save to database
+      try {
+        const { error: dbError } = await supabase
+          .from('notifications')
+          .insert({
+            user_id: customerId,
+            title: notificationData.title,
+            body: notificationData.body,
+            payload: notificationData.payload,
+            sent_at: new Date().toISOString()
           });
 
-          const result = await response.json();
-          return result.data?.status === 'ok';
-        } catch (error) {
-          console.error('📱 Push send error:', error);
-          return false;
+        if (!dbError) {
+          results.databaseSuccess = true;
+        }
+      } catch (dbError) {
+        secureLog.error('Database notification failed:', dbError);
+      }
+
+      // Send push notification
+      try {
+        const { data: pushTokens, error: tokenError } = await supabase
+          .from('user_push_tokens')
+          .select('expo_push_token')
+          .eq('user_id', customerId)
+          .not('expo_push_token', 'is', null);
+
+        if (tokenError || !pushTokens || pushTokens.length === 0) {
+          return results;
+        }
+
+        const pushPromises = pushTokens.map(async (token) => {
+          const message = {
+            to: token.expo_push_token,
+            sound: 'default' as const,
+            title: notificationData.title,
+            body: notificationData.body,
+            data: {
+              ...notificationData.payload,
+              type: 'order_update'
+            }
+          };
+
+          try {
+            const response = await fetch('https://exp.host/--/api/v2/push/send', {
+              method: 'POST',
+              headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(message),
+            });
+
+            const result = await response.json();
+            return result.data?.status === 'ok';
+          } catch (error) {
+            return false;
+          }
+        });
+
+        const pushResults = await Promise.all(pushPromises);
+        results.pushSuccess = pushResults.some(success => success);
+
+      } catch (pushError) {
+        secureLog.error('Push notification error:', pushError);
+      }
+
+      return results;
+
+    } catch (error) {
+      secureLog.error('Notification service error:', error);
+      return { databaseSuccess: false, pushSuccess: false };
+    }
+  };
+
+  // Customer notification
+  const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
+    try {
+      if (!user) return;
+
+      // Get driver's name
+      const { data: driverData } = await supabase
+        .from('users')
+        .select('full_name, phone')
+        .eq('id', user.id)
+        .single();
+
+      let driverName = 'our driver';
+      if (driverData?.full_name) {
+        driverName = driverData.full_name.trim();
+      } else {
+        driverName = user.email?.split('@')[0] || 'our driver';
+      }
+
+      // Get order details
+      const { data: order, error } = await supabase
+        .from('orders')
+        .select(`
+          customer_id, 
+          customer_name,
+          shop_branches(name)
+        `)
+        .eq('id', orderId)
+        .single();
+
+      if (error || !order || !order.customer_id) {
+        return;
+      }
+
+      const isPickupReturn = delivery.order_method === "pickup";
+      
+      let notificationTitle, notificationBody;
+      
+      if (isPickupReturn) {
+        notificationTitle = 'Driver Coming to Return Your Laundry! 🔄';
+        notificationBody = `Driver ${driverName} is coming to return your cleaned laundry`;
+      } else {
+        notificationTitle = 'Driver On The Way! 🚗';
+        notificationBody = `Driver ${driverName} is on the way to deliver your laundry`;
+      }
+
+      await sendCustomerNotification(order.customer_id, {
+        title: notificationTitle,
+        body: notificationBody,
+        payload: {
+          order_id: orderId,
+          order_status: 'out_for_delivery',
+          delivery_status: 'driver_assigned',
+          driver_name: driverName,
+          driver_email: user.email,
+          order_method: delivery.order_method,
+          shop_name: order.shop_branches?.name,
+          timestamp: new Date().toISOString()
         }
       });
 
-      const pushResults = await Promise.all(pushPromises);
-      results.pushSuccess = pushResults.some(success => success);
-      
-      if (results.pushSuccess) {
-        console.log('✅ Push notifications sent successfully');
-      } else {
-        console.log('❌ All push notifications failed');
-      }
-
-    } catch (pushError) {
-      console.error('💥 Push notification error:', pushError);
+    } catch (error) {
+      secureLog.error('Error in notifyCustomerDriverAssigned:', error);
     }
+  };
 
-    return results;
-
-  } catch (error) {
-    console.error('💥 Notification service error:', error);
-    return { databaseSuccess: false, pushSuccess: false };
-  }
-};
-  // Enhanced customer notification
-  // 🔥 ENHANCED: Customer notification with BOTH database + push notifications
-// 🔥 FIXED: Customer notification with DRIVER NAME from users table
-const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
-  try {
-    if (!user) return;
-
-    console.log('📢 Sending notification for order:', orderId);
-    
-    // 1. Get driver's name from users table
-    const { data: driverData, error: driverError } = await supabase
-      .from('users')
-      .select('full_name, phone')
-      .eq('id', user.id)
-      .single();
-
-    let driverName = 'our driver'; // fallback
-    
-    if (!driverError && driverData?.full_name) {
-      driverName = driverData.full_name.trim();
-    } else {
-      console.log('⚠️ No driver name found, using fallback');
-      // Fallback: use first part of email if no name
-      driverName = user.email?.split('@')[0] || 'our driver';
-    }
-
-    // 2. Get order details including customer_id
-    const { data: order, error } = await supabase
-      .from('orders')
-      .select(`
-        customer_id, 
-        customer_name,
-        shop_branches(name)
-      `)
-      .eq('id', orderId)
-      .single();
-
-    if (error || !order || !order.customer_id) {
-      console.warn('❌ No customer found for order:', orderId);
-      return;
-    }
-
-    const isPickupReturn = delivery.order_method === "pickup";
-    
-    // 3. Create appropriate notification message WITH DRIVER NAME
-    let notificationTitle, notificationBody;
-    
-    if (isPickupReturn) {
-      notificationTitle = 'Driver Coming to Return Your Laundry! 🔄';
-      notificationBody = `Driver ${driverName} is coming to return your cleaned laundry`;
-    } else {
-      notificationTitle = 'Driver On The Way! 🚗';
-      notificationBody = `Driver ${driverName} is on the way to deliver your laundry`;
-    }
-
-    // 4. Use the optimized notification service
-    const results = await sendCustomerNotification(order.customer_id, {
-      title: notificationTitle,
-      body: notificationBody,
-      payload: {
-        order_id: orderId,
-        order_status: 'out_for_delivery',
-        delivery_status: 'driver_assigned',
-        driver_name: driverName, // ✅ Now using actual name
-        driver_email: user.email, // ✅ Still include email for reference
-        order_method: delivery.order_method,
-        shop_name: order.shop_branches?.name,
-        timestamp: new Date().toISOString()
-      }
-    });
-
-    console.log('📊 Notification results:', {
-      database: results.databaseSuccess ? '✅' : '❌',
-      push: results.pushSuccess ? '✅' : '❌',
-      driver_name: driverName
-    });
-
-  } catch (error) {
-    console.error('💥 Error in notifyCustomerDriverAssigned:', error);
-  }
-};
-
-  // Enhanced delivery assignment
+  // Delivery assignment
   const takeDelivery = async (): Promise<void> => {
     if (!user) {
       Alert.alert(
@@ -449,14 +424,7 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
     try {
       setIsTakingDelivery(true);
 
-      console.log('🔍 Starting delivery process:', {
-        order_id: delivery.order_id,
-        order_item_id: delivery.order_item_id,
-        customer_name: delivery.customer_name,
-        driver_id: user.id
-      });
-
-      // 1. Validate that the ORDER exists
+      // Validate order exists
       const { data: order, error: orderError } = await supabase
         .from('orders')
         .select('id, customer_name, created_at')
@@ -464,10 +432,6 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
         .single();
 
       if (orderError || !order) {
-        console.error('❌ ORDER NOT FOUND:', { 
-          searched_order_id: delivery.order_id,
-          error: orderError 
-        });
         Alert.alert(
           "Order Not Found", 
           `Order ID: ${delivery.order_id}\n\nThis order does not exist in the database. Please check the order details.`
@@ -475,9 +439,7 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
         return;
       }
 
-      console.log('✅ ORDER FOUND:', order);
-
-      // 2. Validate ORDER_ITEM exists and is ready
+      // Validate order item exists and is ready
       const { data: orderItem, error: orderItemError } = await supabase
         .from('order_items')
         .select('id, status, order_id, quantity')
@@ -485,10 +447,6 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
         .single();
 
       if (orderItemError || !orderItem) {
-        console.error('❌ ORDER ITEM NOT FOUND:', {
-          searched_order_item_id: delivery.order_item_id,
-          error: orderItemError
-        });
         Alert.alert(
           "Order Item Not Found", 
           `Order Item ID: ${delivery.order_item_id}\n\nNo order item found with that ID.`
@@ -496,20 +454,13 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
         return;
       }
 
-      console.log('✅ ORDER ITEM FOUND:', orderItem);
-
       // Verify order_item belongs to the correct order
       if (orderItem.order_id !== delivery.order_id) {
-        console.error('❌ ORDER ITEM MISMATCH:', {
-          expected_order_id: delivery.order_id,
-          actual_order_id: orderItem.order_id
-        });
         Alert.alert("Data Mismatch", "Order item does not belong to this order.");
         return;
       }
 
       if (orderItem.status !== 'ready_for_delivery') {
-        console.log('❌ ORDER NOT READY:', { current_status: orderItem.status });
         Alert.alert(
           "Cannot Take Delivery", 
           `Current status: ${orderItem.status}\n\nOrder must be 'ready_for_delivery' to proceed.`
@@ -517,9 +468,7 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
         return;
       }
 
-      console.log('✅ ORDER ITEM IS READY FOR DELIVERY');
-
-      // 3. Check if driver already has an active delivery
+      // Check if driver already has an active delivery
       const { data: existingActiveDelivery, error: activeCheckError } = await supabase
         .from("deliveries")
         .select("id, order_id, status")
@@ -528,12 +477,10 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
         .maybeSingle();
 
       if (activeCheckError) {
-        console.error('Error checking active deliveries:', activeCheckError);
         throw activeCheckError;
       }
 
       if (existingActiveDelivery) {
-        console.log('❌ DRIVER HAS ACTIVE DELIVERY:', existingActiveDelivery);
         Alert.alert(
           "Already Have Active Delivery",
           "You already have an active delivery. Please complete it before taking a new one.",
@@ -551,9 +498,7 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
         return;
       }
 
-      console.log('✅ No active deliveries found');
-
-      // 4. Check if delivery already exists for this order
+      // Check if delivery already exists for this order
       const { data: existingDelivery, error: checkError } = await supabase
         .from("deliveries")
         .select("id, driver_id, status")
@@ -561,12 +506,10 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
         .maybeSingle();
 
       if (checkError) {
-        console.error('Error checking existing delivery:', checkError);
         throw checkError;
       }
 
       if (existingDelivery) {
-        console.log('❌ DELIVERY ALREADY EXISTS:', existingDelivery);
         if (existingDelivery.driver_id === user.id) {
           Alert.alert("Already Taken", "You have already taken this delivery.");
         } else {
@@ -575,10 +518,7 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
         return;
       }
 
-      console.log('✅ No existing delivery found');
-
-      // 5. Insert the delivery record
-      console.log('🚀 Creating delivery record...');
+      // Insert the delivery record
       const { data: newDelivery, error: deliveryError } = await supabase
         .from("deliveries")
         .insert({
@@ -592,7 +532,6 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
         .single();
 
       if (deliveryError) {
-        console.error('❌ DELIVERY CREATION FAILED:', deliveryError);
         if (deliveryError.code === "42501") {
           Alert.alert(
             "Permission Denied", 
@@ -606,32 +545,23 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
         return;
       }
 
-      console.log('✅ DELIVERY CREATED SUCCESSFULLY:', newDelivery.id);
-
-      // 6. Update order item status
-      console.log('🔄 Updating order item status...');
+      // Update order item status
       const { error: updateError } = await supabase
         .from('order_items')
         .update({ status: 'out_for_delivery' })
         .eq('id', delivery.order_item_id);
 
       if (updateError) {
-        console.error('❌ ORDER ITEM UPDATE FAILED:', updateError);
         // Rollback delivery creation
         await supabase.from('deliveries').delete().eq('id', newDelivery.id);
         Alert.alert("Update Error", "Failed to update order status. Please try again.");
         return;
       }
 
-      console.log('✅ ORDER ITEM STATUS UPDATED TO: out_for_delivery');
-
-      // 7. Send notification to customer
-      console.log('📢 Sending customer notification...');
+      // Send notification to customer
       await notifyCustomerDriverAssigned(delivery.order_id);
 
-      console.log('🎉 DELIVERY PROCESS COMPLETED SUCCESSFULLY!');
-
-      // 8. Navigate to delivery tracking
+      // Navigate to delivery tracking
       router.replace({
         pathname: "/delivery/[id]",
         params: {
@@ -648,7 +578,7 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
       });
 
     } catch (error: any) {
-      console.error("💥 UNEXPECTED ERROR TAKING DELIVERY:", error);
+      secureLog.error("Unexpected error taking delivery:", error);
       Alert.alert(
         "Unexpected Error", 
         error.message || "An unexpected error occurred while taking the delivery."
@@ -726,13 +656,7 @@ const notifyCustomerDriverAssigned = async (orderId: string): Promise<void> => {
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#333" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{actionType} Route</Text>
-        <View style={{ width: 24 }} />
-      </View>
+      <AppHeader title="DELIVERY ROUTE" />
 
       {/* Map */}
       <View style={styles.mapContainer}>
@@ -883,23 +807,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: scale(20),
-    paddingVertical: verticalScale(15),
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  backButton: {
-    padding: scale(4),
-  },
-  headerTitle: {
-    fontSize: moderateScale(18),
-    fontWeight: 'bold',
-    color: '#333',
   },
   mapContainer: {
     flex: 1,

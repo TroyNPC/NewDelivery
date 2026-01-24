@@ -7,18 +7,20 @@ import Svg, { Path } from 'react-native-svg';
 interface AppHeaderProps {
   title: string;
   rightElement?: React.ReactNode;
+  leftElement?: React.ReactNode; // ADD THIS
 }
 
 export const AppHeader: React.FC<AppHeaderProps> = ({
   title,
   rightElement,
+  leftElement, // ADD THIS
 }) => {
   return (
     <View style={styles.headerBox}>
       {/* Exact same wave as NotificationsScreen */}
       <Svg 
         width="100%" 
-        height={mvs(260)} 
+        height={mvs(240)} 
         viewBox="0 0 1440 320" 
         style={styles.waveTop}
         preserveAspectRatio="none"
@@ -27,8 +29,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       </Svg>
 
       <View style={styles.headerContent}>
-        {/* Left placeholder for balance */}
-        <View style={styles.placeholder} />
+        {/* Left element (back button) */}
+        <View style={styles.leftElementContainer}>
+          {leftElement || <View style={styles.placeholder} />}
+        </View>
         
         {/* Centered title */}
         <Text style={styles.headerTitle}>
@@ -47,7 +51,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 const styles = ScaledSheet.create({
   headerBox: {
     width: '100%',
-    height: mvs(90),
+    height: mvs(80),
     backgroundColor: '#0AADFF',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -79,6 +83,10 @@ const styles = ScaledSheet.create({
   },
   placeholder: {
     width: s(24),
+  },
+  leftElementContainer: { // ADD THIS
+    marginRight: 'auto',
+    zIndex: 2,
   },
   rightElementContainer: {
     marginLeft: 'auto',

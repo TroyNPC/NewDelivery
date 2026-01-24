@@ -25,9 +25,8 @@ import {
   View,
 } from "react-native";
 import { moderateScale, scale, verticalScale } from "react-native-size-matters";
-import Svg, { Path } from "react-native-svg";
 import { WebView } from "react-native-webview";
-
+import { AppHeader } from '../component/AppHeader';
 type PickupStatus = "in_progress" | "collected" | "delivered_to_shop";
 
 // Fixed type to match Expo Location's actual return types
@@ -386,7 +385,7 @@ const getMapHTML = (pickupLat: number, pickupLng: number, customerName: string, 
         
         <div id="map"></div>
         
-        <div id="debugPanel" class="debug-panel" style="display: none;">
+        <div id="debugPanel" class="debug-panel:none" style="display:none;">
           <div>Map: <span id="debugMapStatus">Not initialized</span></div>
           <div>Marker: <span id="debugMarkerStatus">Not created</span></div>
           <div>Last Location: <span id="debugLastLocation">None</span></div>
@@ -1516,31 +1515,7 @@ const sendPickupNotification = async (status: PickupStatus) => {
   );
 
   // Debug panel component
-  const DebugPanel = () => (
-    <View style={styles.debugPanel}>
-      <Text style={styles.debugTitle}>Pickup Status</Text>
-      <StatusIndicator />
-      <Text>Location: {currentLocation ? `${currentLocation.lat.toFixed(6)}, ${currentLocation.lng.toFixed(6)}` : 'None'}</Text>
-      <Text>Accuracy: {getAccuracyDisplay(currentLocation?.accuracy)}</Text>
-      <Text>Map Ready: {anyMapReady ? '✅' : '❌'}</Text>
-      <Text>Status: {pickupStatus}</Text>
-      <Text>Distance: {distance}</Text>
-      <Text>ETA: {eta}</Text>
-      <Text>Next Turn: {nextInstruction ? `${nextInstruction.text} in ${formatDistance(nextInstruction.distance)}` : 'None'}</Text>
-      <Text>Arrived: {hasArrived ? '✅' : '❌'}</Text>
-      <Text>Recalculating: {recalculating ? '🔄' : '✅'}</Text>
-      <TouchableOpacity 
-        style={styles.reloadButton}
-        onPress={reloadWebViews}
-      >
-        <Text style={styles.reloadButtonText}>RELOAD MAPS</Text>
-      </TouchableOpacity>
-      <Text style={styles.debugLogsTitle}>Recent Logs:</Text>
-      {debugLogs.map((log, index) => (
-        <Text key={index} style={styles.debugLog}>{log}</Text>
-      ))}
-    </View>
-  );
+  
 
   // Status configuration for PICKUP - WITH NULL SAFETY
   const statusConfig = {
@@ -1585,22 +1560,18 @@ const sendPickupNotification = async (status: PickupStatus) => {
   return (
     <SafeAreaView style={styles.container}>
       {/* Header - ORANGE THEME */}
-      <View style={styles.headerBox}>
-        <Svg width="100%" height={verticalScale(90)} viewBox="0 0 1440 320" style={styles.waveTop}>
-          <Path fill="#FF6B35" d="M0,64 C720,-32 720,160 1440,64 L1440,0 L0,0 Z" />
-        </Svg>
-        <View style={styles.headerContent}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="white" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>PICKUP TRACKING</Text>
-          <View style={{ width: 24 }} />
-        </View>
-      </View>
+   {/* Header */}
+<AppHeader 
+  title="PICKUP TRACKING"
+  leftElement={
+    <TouchableOpacity onPress={() => router.back()}>
+      <Ionicons name="arrow-back" size={24} color="white" />
+    </TouchableOpacity>
+  }
+/>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Debug Panel */}
-        <DebugPanel />
 
         {/* Status Card - WITH NULL SAFETY */}
         <View style={[styles.statusCard, { borderLeftColor: currentStatus.color }]}>

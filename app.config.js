@@ -1,5 +1,5 @@
 export default {
-  name: "delivery",
+  name: "LaundryGO Deliver",
   slug: "delivery",
   version: "1.0.0",
   orientation: "portrait",
@@ -17,10 +17,8 @@ export default {
   },
   android: {
     adaptiveIcon: {
-      backgroundColor: "#E6F4FE",
-      foregroundImage: "./assets/images/android-icon-foreground.png",
-      backgroundImage: "./assets/images/android-icon-background.png",
-      monochromeImage: "./assets/images/android-icon-monochrome.png"
+      foregroundImage: "./assets/images/icon.png",
+      backgroundColor: "#E6F4FE"
     },
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
@@ -66,7 +64,7 @@ export default {
   extra: {
     router: {},
     eas: {
-      projectId: "973feae5-ff3b-47cb-bc94-906b3caf813d"
+      projectId: "818591bd-77ed-446c-a9ad-831df8e1d0d7" // ← Add this line
     },
     supabaseUrl: process.env.SUPABASE_URL || "https://isorrhjmjywkldosbltw.supabase.co",
     supabaseAnonKey: process.env.SUPABASE_ANON_KEY || "sb_publishable_SEdBw1VsYsQLhK4M6xXwjw_L7cYquRS"

@@ -12,18 +12,16 @@ export const unstable_settings = {
   anchor: '(tabs)',
 };
 
-// Create client outside component to avoid recreating on re-renders
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      refetchOnWindowFocus: false, // Better for mobile
+      refetchOnWindowFocus: false,
       retry: 1,
-      gcTime: 1000 * 60 * 5, // 5 minutes cache
+      gcTime: 1000 * 60 * 5,
     },
   },
 });
 
-// Protected Stack component
 function ProtectedStack({ children }: { children: React.ReactNode }) {
   return (
     <AuthGuard>
@@ -47,11 +45,27 @@ export default function RootLayout() {
           {/* Tabs - WITH AuthGuard (protected) */}
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           
-          {/* Delivery tracking - WITH AuthGuard (protected) */}
-          <Stack.Screen name="delivery/[id]" options={{ headerShown: false }} />
+          {/* DELIVERY SCREENS - NO HEADERS */}
+          <Stack.Screen 
+            name="delivery/[id]" 
+            options={{ headerShown: false }} 
+          />
+          <Stack.Screen 
+            name="delivery/map-preview" 
+            options={{ headerShown: false }} 
+          />
+          
+          {/* PICKUP SCREENS - NO HEADERS */}
+          <Stack.Screen 
+            name="pickup/[id]" 
+            options={{ headerShown: false }} 
+          />
+          <Stack.Screen 
+            name="pickup/map-preview" 
+            options={{ headerShown: false }} 
+          />
           
           {/* Add other protected screens as needed */}
-          {/* <Stack.Screen name="pickup/[id]" options={{ headerShown: false }} /> */}
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>
